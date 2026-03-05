@@ -104,11 +104,11 @@ def main_logic():
         res = "id_list_message=t-אין לך הרשאה&goto_main=/"
         print("DEBUG: Status: Unauthorized")
     
-    # --- 2. לוגיקה למורשים בלבד (התפריט מגיע כאן) ---
-    else:
-        print(f"DEBUG: Status: Authorized. Processing step: {step}")
-        if step == "menu":
-            res = "read=t-הקש 1 לחדשים או 2 לחיפוש=selection,1,1,1,7,st-javascript,y,no&target=/youtube?step=handle_choice"
+    # --- 2. לוגיקה למורשים בלבד ---
+    # שים לב: ה-elif וה-else כאן מסודרים לפי הסדר הנכון
+    elif step == "menu":
+        res = "read=t-הקש 1 לחדשים או 2 לחיפוש=selection,1,1,1,7,st-javascript,y,no&target=/youtube?step=handle_choice"
+        print("DEBUG: Status: Authorized. Step: menu")
         
     # --- 3. טיפול בבחירה ---
     elif step == "handle_choice":
