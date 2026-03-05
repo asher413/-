@@ -112,6 +112,7 @@ def main_logic():
     return "goto_main=/"
 
 if __name__ == '__main__':
-    # התאמה אוטומטית לפורט של Render
-    port = int(os.environ.get('PORT', 5000))
+    # Render מגדיר משתנה סביבה בשם PORT. אם הוא לא קיים, נשתמש ב-10000 (הסטנדרט של רנדר)
+    port = int(os.environ.get('PORT', 10000))
+    # חשוב מאוד: host='0.0.0.0' מאפשר גישה חיצונית לשרת
     app.run(host='0.0.0.0', port=port)
