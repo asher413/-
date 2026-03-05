@@ -92,16 +92,23 @@ def main_logic():
     print("FULL REQUEST:", request.url)
     print("DEBUG args:", dict(request.args))
 
-    # --- 1. אבטחת גישה ---
-    if ACCESS_MODE == "whitelist" and phone and phone != TARGET_PHONE.strip():
-        res = "id_list_message=t-אין לך הרשאה&goto_main=/"
-    
+    # --- 1. אבטחת גישה (תיקון חסינה מטעויות) ---
+    is_authorized = True
+    if ACCESS_MODE == "whitelist" and phone != TARGET_PHONE.strip():
+        is_authorized = False
     elif ACCESS_MODE == "blacklist" and phone == TARGET_PHONE.strip():
-        res = "id_list_message=t-הגישה למספרך נחסמה&goto_main=/"
-        
-    # --- 2. תפריט ראשי ---
-    elif step == "menu":
-        res = "read=t-לשירים חדשים הקש 1. לחיפוש קולי מתקדם הקש 2.=selection,1,1,1,7,st-javascript,y,no&target=/youtube?step=handle_choice"
+        is_authorized = False
+
+    # בדיקה סופית - אם לא מורשה, שלח הודעת חסימה
+    if not is_authorized:
+        res = "id_list_message=t-אין לך הרשאה&goto_main=/"
+        print("DEBUG: Status: Unauthorized")
+    
+    # --- 2. לוגיקה למורשים בלבד (התפריט מגיע כאן) ---
+    else:
+        print(f"DEBUG: Status: Authorized. Processing step: {step}")
+        if step == "menu":
+            res = "read=t-הקש 1 לחדשים או 2 לחיפוש=selection,1,1,1,7,st-javascript,y,no&target=/youtube?step=handle_choice"
         
     # --- 3. טיפול בבחירה ---
     elif step == "handle_choice":
