@@ -79,6 +79,13 @@ def main_logic():
     step = request.args.get("step", "menu")
     res = ""
 
+    # --- טיפול בשיחה שהסתיימה ---
+    if request.args.get("hangup") == "yes":
+        res = "goto_main=/"
+        response = make_response(res)
+        response.headers['Content-Type'] = 'text/plain; charset=utf-8'
+        return response
+    
     # לוגים מורחבים
     print(f"DEBUG: Phone received: '{phone}' | Target expected: '{TARGET_PHONE}'")
     print(f"DEBUG: Step: {step}")
