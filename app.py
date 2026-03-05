@@ -46,9 +46,9 @@ def main_logic():
 
     # --- 2. תפריט ראשי ---
     if step == "menu":
-        return ("read=t-לשירים חדשים הקש 1. לחיפוש קולי מתקדם הקש 2.=selection,1,1,1,7,st-javascript,y,no"
-                "&target=/youtube?step=handle_choice")
-
+        # הוספנו תגובה ברורה יותר עם סיומת נכונה
+        return "read=t-שלום. לשירים חדשים הקש 1. לחיפוש קולי הקש 2.=selection,1,1,1,7,st-javascript,y,no&target=/youtube?step=handle_choice"
+        
     # --- 3. טיפול בבחירה (שירים חדשים או חיפוש) ---
     if step == "handle_choice":
         selection = request.args.get("selection")
