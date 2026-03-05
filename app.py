@@ -77,7 +77,10 @@ def build_target(base, params: dict):
 def main_logic():
     phone = request.args.get("ApiPhone", "").strip()
     step = request.args.get("step", "menu")
-    res = ""
+    
+    # --- מעקף: אם הגיעה בחירה, שנה שלב באופן ידני ---
+    if request.args.get("selection") and step == "menu":
+        step = "handle_choice"
 
     # --- טיפול בשיחה שהסתיימה ---
     if request.args.get("hangup") == "yes":
@@ -107,8 +110,9 @@ def main_logic():
     # --- 2. לוגיקה למורשים בלבד ---
     # שים לב: ה-elif וה-else כאן מסודרים לפי הסדר הנכון
     elif step == "menu":
-        res = "read=t-הקש 1 לחדשים או 2 לחיפוש=selection,1,1,1,7,st-javascript,y,no&target=/youtube?step=handle_choice"
-        print("DEBUG: Status: Authorized. Step: menu")
+        # הוספנו את ה-URL המלא ב-target כדי למנוע בלבול של ימות המשיח
+        res = "read=t-הקש 1 לשירים חדשים או 2 לחיפוש=selection,1,1,1,7,st-javascript,y,no&target=/youtube?step=handle_choice"
+        print("DEBUG: Status: Authorized. Sent Menu with target handle_choice")
         
     # --- 3. טיפול בבחירה ---
     elif step == "handle_choice":
