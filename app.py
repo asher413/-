@@ -77,9 +77,11 @@ def build_target(base, params: dict):
 def main_logic():
     phone = request.args.get("ApiPhone", "").strip()
     step = request.args.get("step", "menu")
-    
-    # --- מעקף: אם הגיעה בחירה, שנה שלב באופן ידני ---
-    if request.args.get("selection") and step == "menu":
+    res = ""
+
+    # --- 1. המעקף ששובר את הלופ (הוספה בלבד) ---
+    selection = request.args.get("selection")
+    if selection and step == "menu":
         step = "handle_choice"
 
     # --- טיפול בשיחה שהסתיימה ---
@@ -92,27 +94,46 @@ def main_logic():
     # לוגים מורחבים
     print(f"DEBUG: Phone received: '{phone}' | Target expected: '{TARGET_PHONE}'")
     print(f"DEBUG: Step: {step}")
-    print("FULL REQUEST:", request.url)
-    print("DEBUG args:", dict(request.args))
 
-    # --- 1. אבטחת גישה (תיקון חסינה מטעויות) ---
+    # --- 1. אבטחת גישה ---
     is_authorized = True
     if ACCESS_MODE == "whitelist" and phone != TARGET_PHONE.strip():
         is_authorized = False
     elif ACCESS_MODE == "blacklist" and phone == TARGET_PHONE.strip():
         is_authorized = False
 
-    # בדיקה סופית - אם לא מורשה, שלח הודעת חסימה
+    # בדיקה סופית של הרשאה
     if not is_authorized:
         res = "id_list_message=t-אין לך הרשאה&goto_main=/"
         print("DEBUG: Status: Unauthorized")
     
     # --- 2. לוגיקה למורשים בלבד ---
-    # שים לב: ה-elif וה-else כאן מסודרים לפי הסדר הנכון
     elif step == "menu":
-        # הוספנו את ה-URL המלא ב-target כדי למנוע בלבול של ימות המשיח
-        res = "read=t-הקש 1 לשירים חדשים או 2 לחיפוש=selection,1,1,1,7,st-javascript,y,no&target=/youtube?step=handle_choice"
-        print("DEBUG: Status: Authorized. Sent Menu with target handle_choice")
+        res = "read=t-הקש 1 לחדשים או 2 לחיפוש=selection,1,1,1,7,st-javascript,y,no&target=/youtube?step=handle_choice"
+        print("DEBUG: Status: Authorized. Step: menu")
+
+    elif step == "handle_choice":
+        # כאן selection כבר קיים מההוספה למעלה
+        if selection == "1":
+            res = "target=/youtube?step=search&query=שירים חדשים"
+        elif selection == "2":
+            res = "read=t-נא אמרו את שם השיר=query,1,1,1,7,st-voice,y,no&target=/youtube?step=search"
+        else:
+            res = "goto_main=/"
+        print(f"DEBUG: Handle Choice: {selection}")
+
+    elif step == "search":
+        query = request.args.get("query", "")
+        # כאן תבוא לוגיקת החיפוש המלאה שלך
+        res = f"target=/youtube?step=play_logic&query={query}" 
+
+    else:
+        res = "goto_main=/"
+
+    # החזרת התגובה
+    response = make_response(res)
+    response.headers['Content-Type'] = 'text/plain; charset=utf-8'
+    return response
         
     # --- 3. טיפול בבחירה ---
     elif step == "handle_choice":
