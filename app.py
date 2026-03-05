@@ -3,7 +3,7 @@ import os
 from flask import Flask, request, make_response
 import yt_dlp
 from urllib.parse import quote
-import time  # הוספה לצורך cache וזמן
+import time  # לצורך cache ודפדוף
 
 app = Flask(__name__)
 
@@ -12,9 +12,12 @@ ACCESS_MODE = "whitelist"  # אפשרויות: "whitelist" או "blacklist"
 TARGET_PHONE = "0534133753" # המספר שעליו תתבצע הבדיקה
 FORBIDDEN_WORDS = ["מילה_אסורה1", "זמר_לא_מתאים", "תוכן_רע"] # מילים לסינון
 
-# --- Cache לחיפושי YouTube (תוספת שלי) ---
+# --- Cache לחיפושי YouTube ---
 SEARCH_CACHE = {}
 CACHE_TIME = 300  # 5 דקות
+
+# --- אחסון תוצאות לדפדוף ---
+RESULT_STORE = {}
 
 def get_cached_search(query):
     now = time.time()
@@ -28,6 +31,18 @@ def get_cached_search(query):
 def set_cached_search(query, data):
     SEARCH_CACHE[query] = (data, time.time())
 
+def store_results(results):
+    key = str(int(time.time()*1000))
+    RESULT_STORE[key] = results
+    if len(RESULT_STORE) > 50:
+        RESULT_STORE.pop(next(iter(RESULT_STORE)))
+    return key
+
+def get_page(results, page, per_page=5):
+    start = page * per_page
+    end = start + per_page
+    return results[start:end]
+
 # --- פונקציות עזר למניעת חסימות ---
 def get_yt_options(is_search=True):
     opts = {
@@ -38,7 +53,7 @@ def get_yt_options(is_search=True):
         'nocheckcertificate': True,
         'geo_bypass': True,
         'extract_flat': is_search,
-        'force_ipv4': True,  # תוספת לשיפור יציבות
+        'force_ipv4': True,
         'retries': 5,
         'fragment_retries': 5,
         'socket_timeout': 10,
@@ -53,26 +68,24 @@ def is_filtered(text):
     if not text: return False
     return any(word.lower() in text.lower() for word in FORBIDDEN_WORDS)
 
-# --- פונקציה חדשה שלי – בניית target עם פרמטרים ---
+# פונקציה חדשה – בניית target עם פרמטרים
 def build_target(base, params: dict):
     query = "&".join([f"{k}={quote(str(v))}" for k,v in params.items()])
     return f"{base}&{query}" if "?" in base else f"{base}?{query}"
 
-# --- הקוד המקורי שלך מתחיל כאן --- #
 @app.route('/youtube', methods=['GET', 'POST'])
 def main_logic():
-    # ניקוי מספר הטלפון מרווחים מיותרים
     phone = request.args.get("ApiPhone", "").strip()
     step = request.args.get("step", "menu")
     res = ""
 
-    # לוגים מורחבים (תוספת שלי)
+    # לוגים מורחבים
     print(f"DEBUG: Phone received: '{phone}' | Target expected: '{TARGET_PHONE}'")
     print(f"DEBUG: Step: {step}")
     print("FULL REQUEST:", request.url)
     print("DEBUG args:", dict(request.args))
 
-    # --- 1. אבטחת גישה משופרת ---
+    # --- 1. אבטחת גישה ---
     if ACCESS_MODE == "whitelist" and phone and phone != TARGET_PHONE.strip():
         res = "id_list_message=t-אין לך הרשאה&goto_main=/"
     
@@ -94,12 +107,10 @@ def main_logic():
         else:
             res = "goto_main=/"
 
-    # --- 4. ביצוע חיפוש וסינון תוצאות ---
+    # --- 4. חיפוש וסינון ---
     elif step == "search":
         query = request.args.get("query", "")
         print("DEBUG search query:", query)
-        
-        # שימוש ב-cache (תוספת שלי)
         cached = get_cached_search(query)
         if cached:
             info = cached
@@ -117,18 +128,18 @@ def main_logic():
 
         entries = info.get('entries', [])
         valid_results = [e for e in entries if not is_filtered(e.get('title')) and not is_filtered(e.get('uploader'))]
-
         if not valid_results:
             res = "id_list_message=t-לא נמצאו תוצאות מתאימות לחיפוש זה&goto_main=/"
         else:
-            first_video = valid_results[0]
+            store_key = store_results(valid_results)
+            page = 0
+            page_results = get_page(valid_results, page)
+            first_video = page_results[0]
             first_id = first_video['id']
             first_title = first_video['title']
-            others = ",".join([v['id'] for v in valid_results[1:10]])
+            others = ",".join([v['id'] for v in page_results[1:]])
             print("DEBUG first video:", first_id)
-            
-            # שימוש בפונקציה שלי לבניית target עם פרמטרים
-            target = build_target("/youtube?step=play_logic", {"first_id": first_id, "others": others})
+            target = build_target("/youtube?step=play_logic", {"first_id": first_id, "others": others, "store": store_key, "page": page})
             res = (f"read=t-נמצא: {first_title}. להשמעה הקש 1. לשאר התוצאות הקש 2.=choice,1,1,1,7,st-javascript,y,no"
                    f"&target={target}")
 
@@ -137,17 +148,28 @@ def main_logic():
         choice = request.args.get("choice")
         first_id = request.args.get("first_id")
         others = request.args.get("others", "")
-        print("DEBUG play_logic:", choice, first_id, others)
+        store_key = request.args.get("store")
+        page = int(request.args.get("page",0))
+        print("DEBUG play_logic:", choice, first_id, others, store_key, page)
         if choice == "1" and first_id:
             res = f"target=/youtube?step=get_link&vid={first_id}"
         else:
-            others_list = others.split(",")
-            if others_list and others_list[0]:
-                res = f"target=/youtube?step=get_link&vid={others_list[0]}"
+            # דפדוף לעמוד הבא
+            page += 1
+            results = RESULT_STORE.get(store_key, [])
+            page_results = get_page(results, page)
+            if not page_results:
+                res = "id_list_message=t-אין עוד תוצאות&goto_main=/"
             else:
-                res = "id_list_message=t-אין תוצאות נוספות&goto_main=/"
+                first_video = page_results[0]
+                first_id = first_video['id']
+                first_title = first_video['title']
+                others = ",".join([v['id'] for v in page_results[1:]])
+                target = build_target("/youtube?step=play_logic", {"first_id": first_id, "others": others, "store": store_key, "page": page})
+                res = (f"read=t-נמצא: {first_title}. להשמעה הקש 1. לתוצאות הבאות הקש 2.=choice,1,1,1,7,st-javascript,y,no"
+                       f"&target={target}")
 
-    # --- 6. חילוץ לינק ישיר להשמעה ---
+    # --- 6. חילוץ לינק ---
     elif step == "get_link":
         video_id = request.args.get("vid")
         print("DEBUG play video:", video_id)
@@ -163,7 +185,6 @@ def main_logic():
     else:
         res = "goto_main=/"
 
-    # --- התיקון הקריטי למניעת הניתוק בימות המשיח ---
     response = make_response(res)
     response.headers['Content-Type'] = 'text/plain; charset=utf-8'
     return response
