@@ -6,7 +6,7 @@ import yt_dlp
 app = Flask(__name__)
 
 # --- הגדרות מערכת (ערוך כאן) ---
-ACCESS_MODE = "whitelist"  # אפשרויות: "whitelist" או "blacklist"
+ACCESS_MODE = "open" # שנה את זה כדי לבטל זמנית את חסימת המספרים
 TARGET_PHONE = "0534133753" # המספר שעליו תתבצע הבדיקה
 FORBIDDEN_WORDS = ["מילה_אסורה1", "זמר_לא_מתאים", "תוכן_רע"] # מילים לסינון
 
@@ -38,11 +38,10 @@ def main_logic():
     res = "" # משתנה לאחסון התשובה
 
     # --- 1. אבטחת גישה (חסימה/אישור מספר) ---
-    if ACCESS_MODE == "whitelist" and phone != TARGET_PHONE:
-        res = "id_list_message=t-אין לך הרשאה לגשת לשירות זה&goto_main=/"
-    
-    elif ACCESS_MODE == "blacklist" and phone == TARGET_PHONE:
-        res = "id_list_message=t-הגישה למספרך נחסמה&goto_main=/"
+    if ACCESS_MODE == "whitelist" and TARGET_PHONE not in current_phone:
+        res = "id_list_message=t-אין לך הרשאה&goto_main=/"
+    else:
+        # כאן יבוא המשך הקוד (התפריט)
 
     # --- 2. תפריט ראשי ---
     elif step == "menu":
