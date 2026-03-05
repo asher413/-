@@ -7,7 +7,7 @@ app = Flask(__name__)
 
 # --- הגדרות מערכת (ערוך כאן) ---
 ACCESS_MODE = "whitelist"  # אפשרויות: "whitelist" או "blacklist"
-TARGET_PHONE = "534133753" # המספר שעליו תתבצע הבדיקה
+TARGET_PHONE = "0534133753" # המספר שעליו תתבצע הבדיקה
 FORBIDDEN_WORDS = ["מילה_אסורה1", "זמר_לא_מתאים", "תוכן_רע"] # מילים לסינון
 
 # --- פונקציות עזר למניעת חסימות ---
@@ -33,17 +33,22 @@ def is_filtered(text):
     
 @app.route('/youtube', methods=['GET', 'POST'])
 def main_logic():
-    phone = request.args.get("ApiPhone", "")
+    # ניקוי מספר הטלפון מרווחים מיותרים
+    phone = request.args.get("ApiPhone", "").strip()
     step = request.args.get("step", "menu")
-    res = "" # משתנה לאחסון התשובה
+    res = ""
 
-    # --- 1. אבטחת גישה (חסימה/אישור מספר) ---
-    if ACCESS_MODE == "whitelist" and phone != TARGET_PHONE:
-        res = "id_list_message=t-אין לך הרשאה לגשת לשירות זה&goto_main=/"
+    # הדפסה ללוג כדי שנוכל לראות בדיוק מה הגיע (יופיע ב-Logs ב-Render)
+    print(f"DEBUG: Phone received: '{phone}' | Target expected: '{TARGET_PHONE}'")
+
+    # --- 1. אבטחת גישה משופרת ---
+    # הוספנו .strip() גם ל-TARGET_PHONE כדי למנוע טעויות
+    if ACCESS_MODE == "whitelist" and phone != TARGET_PHONE.strip():
+        res = "id_list_message=t-אין לך הרשאה&goto_main=/"
     
-    elif ACCESS_MODE == "blacklist" and phone == TARGET_PHONE:
+    elif ACCESS_MODE == "blacklist" and phone == TARGET_PHONE.strip():
         res = "id_list_message=t-הגישה למספרך נחסמה&goto_main=/"
-
+        
     # --- 2. תפריט ראשי ---
     elif step == "menu":
         res = "read=t-לשירים חדשים הקש 1. לחיפוש קולי מתקדם הקש 2.=selection,1,1,1,7,st-javascript,y,no&target=/youtube?step=handle_choice"
