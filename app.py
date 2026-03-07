@@ -14,8 +14,6 @@ FORBIDDEN_WORDS = ["מילה_אסורה1", "תוכן_רע"]
 # --- זיכרון זמני ---
 SEARCH_CACHE = {}
 CACHE_TIME = 300
-
-# מערכת ניהול סשנים לזיהוי השלב בו נמצא כל מתקשר
 CALL_SESSIONS = {}
 
 # --- בדיקת שרת ---
@@ -23,41 +21,29 @@ CALL_SESSIONS = {}
 def home():
     return "SERVER_OK"
 
-def get_cached_search(query):
-    now = time.time()
-    if query in SEARCH_CACHE:
-        data, timestamp = SEARCH_CACHE[query]
-        if now - timestamp < CACHE_TIME:
-            return data
-    return None
-
-def set_cached_search(query, data):
-    SEARCH_CACHE[query] = (data, time.time())
-
-# --- yt-dlp options ---
+# --- הגדרות yt-dlp מעודכנות לעקיפת חסימות ---
 def get_yt_options(is_search=True):
     opts = {
         'quiet': True,
         'no_warnings': True,
         'format': 'bestaudio/best',
-        'user_agent': 'Mozilla/5.0',
+        # שימוש ב-User Agent של מכשיר אנדרואיד כדי להפחית חסימות
+        'user_agent': 'Mozilla/5.0 (Android 14; Mobile; rv:128.0) Gecko/128.0 Firefox/128.0',
         'nocheckcertificate': True,
         'geo_bypass': True,
         'extract_flat': is_search,
         'force_ipv4': True,
-        'retries': 5,
-        'socket_timeout': 20,
+        'retries': 10,
+        # שימוש בלקוח אינטרנט של אנדרואיד לעקיפת בוטים
+        'extractor_args': {'youtube': {'player_client': ['android'], 'skip': ['dash', 'hls']}},
     }
     return opts
 
 def is_filtered(text):
-    if not text:
-        return False
+    if not text: return False
     return any(word.lower() in str(text).lower() for word in FORBIDDEN_WORDS)
 
-# פונקציית עזר לתשובות ימות המשיח
 def make_yemot_response(text):
-    print("RESPONSE:", text)
     response = make_response(text + "\n")
     response.headers['Content-Type'] = "text/plain; charset=utf-8"
     return response
@@ -67,126 +53,90 @@ def main_logic():
     phone = request.args.get("ApiPhone", "").strip()
     call_id = request.args.get("ApiCallId", "")
 
-    # ניהול ניתוקים - ניקוי הזיכרון
     if request.args.get("hangup"):
-        print("DEBUG: hangup")
-        if call_id in CALL_SESSIONS:
-            del CALL_SESSIONS[call_id]
+        if call_id in CALL_SESSIONS: del CALL_SESSIONS[call_id]
         return make_response("")
-
-    print(f"DEBUG phone={phone} args={request.args.to_dict()}")
 
     is_authorized = True
     if ACCESS_MODE == "whitelist" and phone != TARGET_PHONE:
         is_authorized = False
-    elif ACCESS_MODE == "blacklist" and phone == TARGET_PHONE:
-        is_authorized = False
-
+    
     if not is_authorized:
         return make_yemot_response("id_list_message=t-אין לך הרשאה&goto_main=/")
 
-    # פתיחת סשן (מצב) חדש לשיחה אם היא לא קיימת
     if call_id not in CALL_SESSIONS:
-        CALL_SESSIONS[call_id] = {"step": "menu"}
-        # מניעת דליפת זיכרון אם מצטברות יותר מדי שיחות
-        if len(CALL_SESSIONS) > 100:
-            CALL_SESSIONS.pop(next(iter(CALL_SESSIONS)))
+        CALL_SESSIONS[call_id] = {"step": "menu", "page": 0}
             
     session = CALL_SESSIONS[call_id]
-    step = session["step"]
-
-    # פונקציה ששולפת תמיד את הקלט האחרון (מתמודדת עם הצטברות פרמטרים בימות)
+    
     def get_last_param(param):
         vals = request.args.getlist(param)
-        vals = [v for v in vals if v.strip()]
         return vals[-1] if vals else None
 
-    res = ""
-
-    # ניהול שלבי השיחה
-    if step == "menu":
+    # תפריט ראשי
+    if session["step"] == "menu":
         selection = get_last_param("selection")
         if not selection:
-            res = "read=t-לשירים חדשים הקש 1 לחיפוש קולי הקש 2=selection,1,1,1,7,st-javascript,y,no"
-        elif selection == "1":
-            session["query"] = "שירים חדשים 2024"
-            res = process_search(session)
+            return make_yemot_response("read=t-לשירים חדשים הקש 1 לחיפוש קולי הקש 2=selection,1,1,1,7,st-javascript,y,no")
+        
+        if selection == "1":
+            # חיפוש אוטומטי של שירים חדשים
+            session["query"] = "שירים חדשים 2026"
+            return process_search(session)
         elif selection == "2":
             session["step"] = "ask_query"
-            res = "read=t-נא אמרו את שם השיר=query,1,1,1,7,st-voice,y,no"
-        else:
-            res = "read=t-לשירים חדשים הקש 1 לחיפוש קולי הקש 2=selection,1,1,1,7,st-javascript,y,no"
+            # st-voice,y,no - הפקודה לזיהוי דיבור בימות המשיח
+            return make_yemot_response("read=t-נא אמרו בקול רם את שם השיר=query,1,1,1,7,st-voice,y,no")
 
-    elif step == "ask_query":
+    # קבלת תוצאת חיפוש קולי
+    elif session["step"] == "ask_query":
         query = get_last_param("query")
         if not query:
-            res = "read=t-נא אמרו את שם השיר=query,1,1,1,7,st-voice,y,no"
-        else:
-            session["query"] = query
-            res = process_search(session)
+            return make_yemot_response("read=t-לא שמעתי, נא אמרו שוב את שם השיר=query,1,1,1,7,st-voice,y,no")
+        session["query"] = query
+        return process_search(session)
 
-    elif step == "wait_choice":
+    # מעבר בין שירים (אם המשתמש ביקש שיר אחר)
+    elif session["step"] == "wait_next":
         choice = get_last_param("choice")
-        if not choice:
-            res = generate_play_menu(session)
-        elif choice == "1":
-            res = process_play(session)
-        else:
-            # מקש אחר - עבור לתוצאה הבאה
+        if choice == "2": # המשתמש רוצה שיר אחר
             session["page"] += 1
-            res = generate_play_menu(session)
+            return process_play(session)
+        else:
+            session["step"] = "menu"
+            return make_yemot_response("goto_main=/")
 
-    return make_yemot_response(res)
-
-
-# --- פונקציות לוגיקה מאחורי הקלעים ---
+    return make_yemot_response("goto_main=/")
 
 def process_search(session):
     query = session.get("query", "")
-    print("SEARCH:", query)
+    # שימוש ב-ytsearchdate כדי להביא את התוצאות הכי חדשות
+    search_query = f"ytsearchdate10:{query}" 
     
-    info = get_cached_search(query)
-    if not info:
-        try:
-            with yt_dlp.YoutubeDL(get_yt_options(True)) as ydl:
-                info = ydl.extract_info(f"ytsearch10:{query}", download=False)
-                set_cached_search(query, info)
-        except Exception as e:
-            print("SEARCH ERROR:", e)
-            session["step"] = "menu"
-            return "id_list_message=t-שגיאה בחיפוש&goto_main=/"
-
-    entries = info.get("entries", [])
-    valid_results = [e for e in entries if not is_filtered(e.get("title"))]
-
-    if not valid_results:
-        session["step"] = "menu"
-        return "id_list_message=t-לא נמצאו תוצאות&goto_main=/"
-    
-    session["results"] = valid_results
-    session["page"] = 0
-    return generate_play_menu(session)
-
-
-def generate_play_menu(session):
-    results = session.get("results", [])
-    page = session.get("page", 0)
-    
-    if page >= len(results):
-        session["step"] = "menu"
-        return "id_list_message=t-אין עוד תוצאות&goto_main=/"
-    
-    video = results[page]
-    session["step"] = "wait_choice"
-    return f"read=t-נמצא {video['title']}=choice,1,1,1,7,st-javascript,y,no"
-
+    try:
+        with yt_dlp.YoutubeDL(get_yt_options(True)) as ydl:
+            info = ydl.extract_info(search_query, download=False)
+            entries = info.get("entries", [])
+            valid_results = [e for e in entries if not is_filtered(e.get("title"))]
+            
+            if not valid_results:
+                return "id_list_message=t-לא נמצאו תוצאות&goto_main=/"
+            
+            session["results"] = valid_results
+            session["page"] = 0
+            # מעבר ישיר לניגון השיר הראשון
+            return process_play(session)
+            
+    except Exception as e:
+        print("SEARCH ERROR:", e)
+        return "id_list_message=t-שגיאה בחיפוש&goto_main=/"
 
 def process_play(session):
     results = session.get("results", [])
     page = session.get("page", 0)
     
     if page >= len(results):
-        return "id_list_message=t-שגיאה בניגון&goto_main=/"
+        return "id_list_message=t-אין יותר שירים&goto_main=/"
 
     video = results[page]
     video_id = video["id"]
@@ -194,13 +144,20 @@ def process_play(session):
     try:
         with yt_dlp.YoutubeDL(get_yt_options(False)) as ydl:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-            session["step"] = "menu" # איפוס לאחר ניגון
-            return f"play_url={info['url']}"
+            url = info.get('url')
+            title = info.get('title', 'שיר')
+            
+            # הודעה על השיר שמתנגן ואפשרות לעבור לשיר הבא בסיום/הקשה
+            session["step"] = "wait_next"
+            return f"id_list_message=t-מנגן כעת {title}&play_url={url}&read=t-לשיר הבא הקש 2=choice,1,1,1,7,st-javascript,y,no"
+            
     except Exception as e:
         print("PLAY ERROR:", e)
-        session["step"] = "menu"
-        return "id_list_message=t-שגיאה בניגון&goto_main=/"
+        # אם שיר אחד חסום, מנסה אוטומטית את הבא בתור
+        session["page"] += 1
+        return process_play(session)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+
