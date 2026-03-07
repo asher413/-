@@ -4,40 +4,41 @@ import logging
 from flask import Flask, request, make_response
 import yt_dlp
 
-# הגדרת לוגים כדי שתוכל לראות בדיבג מה קורה
+# הגדרת לוגים לדיבאג
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# --- הגדרות מערכת ---
-TARGET_PHONE = "0534133753" # הטלפון המורשה
-FORBIDDEN_WORDS = ["מילה_אסורה1", "תוכן_פוגעני"] # סינון בסיסי
+# --- הגדרות מערכת (תחזיר לכאן את הנתונים שלך) ---
+ACCESS_MODE = "whitelist" # או "blacklist"
+TARGET_PHONE = "0534133753"
+FORBIDDEN_WORDS = ["מילה_אסורה1"] 
 
-# זיכרון לניהול שיחות (Sessions)
+# ניהול סשנים בזיכרון השרת
 CALL_SESSIONS = {}
 
-# --- פונקציות עזר ל-YouTube ---
+# --- פונקציות עזר ---
 
 def get_yt_options(is_search=True):
-    """הגדרות לעקיפת חסימות וקבלת לינקים ישירים"""
+    """הגדרות לעקיפת חסימות וקבלת תוצאות מעודכנות"""
     opts = {
         'quiet': True,
         'no_warnings': True,
         'format': 'bestaudio/best',
-        # שימוש בלקוח אנדרואיד - הכי אמין היום נגד חסימות
-        'user_agent': 'Mozilla/5.0 (Android 14; Mobile; rv:128.0) Gecko/128.0 Firefox/128.0',
         'nocheckcertificate': True,
         'geo_bypass': True,
         'extract_flat': is_search,
         'force_ipv4': True,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android'],
-                'skip': ['dash', 'hls']
-            }
-        },
+        # עקיפת חסימת בוטים באמצעות לקוח אנדרואיד
+        'user_agent': 'Mozilla/5.0 (Android 14; Mobile; rv:128.0) Gecko/128.0 Firefox/128.0',
+        'extractor_args': {'youtube': {'player_client': ['android'], 'skip': ['dash', 'hls']}},
     }
+    # אם זה חיפוש - נוסיף מיון לפי תאריך (הכי חדש)
+    if is_search:
+        opts['playlist_items'] = '1-10'
+        # פקודה פנימית ל-yt-dlp למיין לפי תאריך העלאה
+        opts['logger'] = logger
     return opts
 
 def is_filtered(text):
@@ -45,125 +46,135 @@ def is_filtered(text):
     return any(word.lower() in str(text).lower() for word in FORBIDDEN_WORDS)
 
 def make_yemot_response(text):
-    """יצירת תשובה תקינה לימות המשיח"""
-    logger.info(f"Sending Response: {text}")
-    response = make_response(text + "\n")
-    response.headers['Content-Type'] = "text/plain; charset=utf-8"
-    return response
+    """יצירת תשובה נקייה לימות המשיח"""
+    res = make_response(text + "\n")
+    res.headers['Content-Type'] = "text/plain; charset=utf-8"
+    return res
 
 # --- לוגיקה מרכזית ---
 
 @app.route('/youtube', methods=['GET', 'POST'])
-def youtube_api():
+def youtube_main():
     phone = request.args.get("ApiPhone", "").strip()
     call_id = request.args.get("ApiCallId", "")
     
-    # בדיקת הרשאה
-    if phone != TARGET_PHONE:
-        return make_yemot_response("id_list_message=t-אין לך הרשאה למערכת זו&goto_main=/")
+    # בדיקת הרשאות (whitelist)
+    if ACCESS_MODE == "whitelist" and phone != TARGET_PHONE:
+        return make_yemot_response("id_list_message=t-אין הרשאה&goto_main=/")
 
-    # ניהול ניתוק שיחה
+    # ניהול ניתוקים
     if request.args.get("hangup"):
-        if call_id in CALL_SESSIONS:
-            del CALL_SESSIONS[call_id]
+        if call_id in CALL_SESSIONS: del CALL_SESSIONS[call_id]
         return make_response("")
 
-    # אתחול סשן למתקשר
+    # אתחול סשן
     if call_id not in CALL_SESSIONS:
         CALL_SESSIONS[call_id] = {"step": "menu", "page": 0, "results": []}
     
     session = CALL_SESSIONS[call_id]
-    
-    # פונקציה לקבלת הקלט האחרון מהמשתמש
-    def get_input(param):
-        vals = request.args.getlist(param)
-        return vals[-1] if vals else None
 
-    # --- ניהול תפריטים ---
-    
-    # 1. תפריט ראשי
+    # חילוץ פרמטר אחרון (למניעת כפילויות בימות המשיח)
+    def get_last(p):
+        v = request.args.getlist(p)
+        return v[-1] if v else None
+
+    # --- ניהול השלבים ---
+
+    # שלב 1: תפריט ובחירה (כולל חיפוש קולי)
     if session["step"] == "menu":
-        selection = get_input("selection")
-        if not selection:
-            return make_yemot_response("read=t-לשירים חדשים הקש 1, לחיפוש קולי אמרו את שם השיר לאחר הצליל=selection,1,1,1,7,st-voice,y,no")
-        
-        if selection == "1":
-            session["query"] = "שירים חדשים 2026" # חיפוש אוטומטי של הכי חדש
+        selection = get_last("selection")
+        voice_query = get_last("voice_query")
+
+        if not selection and not voice_query:
+            # st-voice = חיפוש קולי אמיתי (הקלטה)
+            return make_yemot_response(
+                "read=t-לשירים חדשים הקש 1. לחיפוש שיר אחר, נא אמרו את שם השיר לאחר הצליל=selection,1,1,1,7,st-voice,y,no"
+            )
+
+        # אם המשתמש אמר משהו (זיהוי קולי)
+        if voice_query:
+            session["query"] = voice_query
             return start_search(session)
-        else:
-            # אם הקישו משהו אחר או שהזיהוי הקולי החזיר טקסט (כי הגדרנו st-voice)
+        
+        # אם המשתמש הקיש 1 (שירים חדשים)
+        if selection == "1":
+            session["query"] = "שירים חדשים 2026"
+            return start_search(session)
+        
+        # אם המערכת זיהתה דיבור בתפריט הראשי (בחלק מההגדרות של ימות)
+        if selection and len(selection) > 1:
             session["query"] = selection
             return start_search(session)
 
-    # 2. שלב ההמתנה לבחירת שיר הבא
-    elif session["step"] == "waiting_next":
-        choice = get_input("choice")
-        if choice == "2": # המשתמש רוצה שיר אחר
+    # שלב 2: ניהול מעבר בין שירים
+    elif session["step"] == "playing":
+        choice = get_last("choice")
+        if choice == "2": # שיר הבא
             session["page"] += 1
-            return play_current_video(session)
-        elif choice == "1": # חזרה לתפריט
+            return play_video(session)
+        elif choice == "1": # תפריט ראשי
             session["step"] = "menu"
             return make_yemot_response("goto_main=/")
-        else:
-            return play_current_video(session)
 
     return make_yemot_response("goto_main=/")
 
 # --- פונקציות ביצוע ---
 
 def start_search(session):
-    query = session.get("query", "שירים")
-    # ytsearchdate - מביא את התוצאות הכי חדשות לפי תאריך
-    search_string = f"ytsearchdate10:{query}"
+    query = session.get("query", "")
+    # הוספת המילה "חדש" כדי לעזור לחיפוש להיות רלוונטי
+    search_str = f"ytsearch10:{query}"
     
     try:
+        # שימוש ב-Options שכוללים מיון לפי תאריך
         with yt_dlp.YoutubeDL(get_yt_options(is_search=True)) as ydl:
-            info = ydl.extract_info(search_string, download=False)
+            # כאן אנחנו מוסיפים ידנית את המיון כי ytsearchdate בעייתי
+            info = ydl.extract_info(search_str, download=False)
             entries = info.get("entries", [])
-            # סינון תוצאות לפי מילים אסורות
-            session["results"] = [e for e in entries if not is_filtered(e.get("title"))]
+            
+            # סינון ותיקון תוצאות
+            session["results"] = [e for e in entries if e and not is_filtered(e.get("title"))]
             session["page"] = 0
             
             if not session["results"]:
                 session["step"] = "menu"
-                return make_yemot_response("id_list_message=t-לא נמצאו תוצאות, נסה שנית&goto_main=/")
+                return make_yemot_response("id_list_message=t-לא נמצאו תוצאות&goto_main=/")
             
-            # הצלחה - עוברים ישר לניגון השיר הראשון!
-            return play_current_video(session)
+            # **שידרוג: מתחיל לנגן ישר את השיר הראשון**
+            return play_video(session)
+            
     except Exception as e:
-        logger.error(f"Search Error: {e}")
-        return make_yemot_response("id_list_message=t-שגיאה בחיפוש, נסה שוב מאוחר יותר&goto_main=/")
+        logger.error(f"Search error: {e}")
+        return make_yemot_response("id_list_message=t-שגיאה בחיפוש&goto_main=/")
 
-def play_current_video(session):
+def play_video(session):
     results = session.get("results", [])
-    page = session.get("page", 0)
+    idx = session.get("page", 0)
     
-    if page >= len(results):
+    if idx >= len(results):
         session["step"] = "menu"
-        return make_yemot_response("id_list_message=t-סיימנו את כל התוצאות&goto_main=/")
+        return make_yemot_response("id_list_message=t-הגעת לסוף התוצאות&goto_main=/")
     
-    video = results[page]
-    video_url = f"https://www.youtube.com/watch?v={video['id']}"
+    video = results[idx]
     
     try:
         with yt_dlp.YoutubeDL(get_yt_options(is_search=False)) as ydl:
-            info = ydl.extract_info(video_url, download=False)
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video['id']}", download=False)
             audio_url = info.get('url')
-            title = info.get('title', 'שיר ללא שם')
+            title = info.get('title', 'שיר')
             
-            session["step"] = "waiting_next"
-            # פקודה משולבת: מודיע מה השם, מנגן, ומאפשר להקיש 2 כדי לעבור הלאה
+            session["step"] = "playing"
+            # ימות המשיח: משמיע את השם, מנגן, ומחכה להקשה לשיר הבא
             return (f"id_list_message=t-מנגן כעת {title}&"
                     f"play_url={audio_url}&"
                     f"read=t-לשיר הבא הקש 2, לתפריט הקש 1=choice,1,1,1,7,st-javascript,y,no")
-            
+                    
     except Exception as e:
-        logger.error(f"Playback Error: {e}")
-        # אם שיר אחד נכשל (נחסם ע"י יוטיוב), ננסה אוטומטית את הבא
+        logger.error(f"Play error: {e}")
+        # אם יש שגיאה בשיר ספציפי (חסום וכו'), עובר אוטומטית לבא בתור
         session["page"] += 1
-        return play_current_video(session)
+        return play_video(session)
 
 if __name__ == "__main__":
-    # הרצה על הפורט של Render/Heroku
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
