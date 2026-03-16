@@ -15,10 +15,8 @@ ACCESS_MODE = "whitelist"
 TARGET_PHONE = "0534133753"
 FORBIDDEN_WORDS = [] 
 
-# ניהול סשנים
 CALL_SESSIONS = {}
 
-# --- תיקון: דף הבית למניעת 404 ---
 @app.route('/')
 def health_check():
     return "OK", 200
@@ -45,10 +43,8 @@ def is_filtered(text):
     return any(word.lower() in str(text).lower() for word in FORBIDDEN_WORDS)
 
 def make_yemot_response(text):
-    """יצירת תשובה נקייה ומדויקת לימות המשיח"""
-    # ניקוי רווחים ולוודא שאין שורות ריקות מיותרות
-    clean_text = text.strip()
-    res = make_response(clean_text + "\n")
+    """תגובה נקייה לחלוטין לימות המשיח"""
+    res = make_response(text.strip() + "\n")
     res.headers['Content-Type'] = "text/plain; charset=utf-8"
     return res
 
@@ -59,11 +55,9 @@ def youtube_main():
     phone = request.args.get("ApiPhone", "").strip()
     call_id = request.args.get("ApiCallId", "")
     
-    # בדיקת הרשאות
     if ACCESS_MODE == "whitelist" and phone != TARGET_PHONE:
         return make_yemot_response("id_list_message=t-אין הרשאה&goto_main=/")
 
-    # ניהול ניתוקים
     if request.args.get("hangup"):
         if call_id in CALL_SESSIONS: del CALL_SESSIONS[call_id]
         return make_response("")
@@ -77,18 +71,15 @@ def youtube_main():
         v = request.args.getlist(p)
         return v[-1] if v else None
 
-    # משתנה הקלט (v במקום selection)
     user_input = get_last("v")
 
     # --- ניהול השלבים ---
 
     if session["step"] == "menu":
         if not user_input:
-            # שימוש במבנה המפוצל - הכי בטוח למנוע ניתוקים
-            msg = "t-לשירים חדשים הקש 1. לחיפוש שיר אחר נא אמרו את שם השיר"
-            return make_yemot_response(f"id_list_message={msg}&read=v,no,1,1,7,v")
+            # תיקון: טקסט בתוך ה-read, סוג קלט all, מקסימום 50 תווים
+            return make_yemot_response("read=t-לשירים חדשים הקש 1. לחיפוש אחר נא אמרו את שם השיר=v,no,1,50,7,all")
 
-        # אם הקיש 1 או אמר משהו
         if user_input == "1":
             session["query"] = "שירים חדשים 2026"
         else:
@@ -110,7 +101,6 @@ def youtube_main():
 def start_search(session):
     query = session.get("query", "")
     search_str = f"ytsearch10:{query}"
-    
     try:
         with yt_dlp.YoutubeDL(get_yt_options(is_search=True)) as ydl:
             info = ydl.extract_info(search_str, download=False)
@@ -141,15 +131,15 @@ def play_video(session):
         with yt_dlp.YoutubeDL(get_yt_options(is_search=False)) as ydl:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={video['id']}", download=False)
             audio_url = info.get('url', '').replace("&", "%26")
-            title = info.get('title', 'שיר').replace(",", " ") # מניעת בעיות פסיקים
+            title = info.get('title', 'שיר').replace(",", " ").replace("&", " ")
             
             session["step"] = "playing"
             
-            # מבנה פקודה מאוחד וקריא לימות המשיח
+            # תיקון: מבנה פקודה רציף ללא תווים שוברים
             return make_yemot_response(
                 f"id_list_message=t-מנגן {title}&"
                 f"play_url={audio_url}&"
-                f"read=v,no,1,1,7"
+                f"read=t-לשיר הבא הקש 2. לתפריט הקש 1=v,no,1,1,7,digits"
             )
     except Exception as e:
         logger.error(f"Play error: {e}")
