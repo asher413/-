@@ -43,7 +43,7 @@ def is_filtered(text):
     return any(word.lower() in str(text).lower() for word in FORBIDDEN_WORDS)
 
 def make_yemot_response(text):
-    """תגובה נקייה לחלוטין לימות המשיח"""
+    """תגובה נקייה ללא תווים בלתי נראים"""
     res = make_response(text.strip() + "\n")
     res.headers['Content-Type'] = "text/plain; charset=utf-8"
     return res
@@ -71,14 +71,16 @@ def youtube_main():
         v = request.args.getlist(p)
         return v[-1] if v else None
 
+    # המשתנה שיקבל את התשובה
     user_input = get_last("v")
 
     # --- ניהול השלבים ---
 
     if session["step"] == "menu":
         if not user_input:
-            # תיקון: טקסט בתוך ה-read, סוג קלט all, מקסימום 50 תווים
-            return make_yemot_response("read=t-לשירים חדשים הקש 1. לחיפוש אחר נא אמרו את שם השיר=v,no,1,50,7,all")
+            # התיקון הקריטי: שימוש ב-digits בתוספת הגדרות ה-STT ב-ext.ini
+            # מבנה: read=טקסט=שם_משתנה,אישור_דיבור,מינימום,מקסימום,זמן_המתנה,סוג_מקלדת
+            return make_yemot_response("read=t-לשירים חדשים הקש 1. לחיפוש אחר נא אמרו שם שיר=v,no,1,50,10,digits")
 
         if user_input == "1":
             session["query"] = "שירים חדשים 2026"
@@ -131,11 +133,12 @@ def play_video(session):
         with yt_dlp.YoutubeDL(get_yt_options(is_search=False)) as ydl:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={video['id']}", download=False)
             audio_url = info.get('url', '').replace("&", "%26")
-            title = info.get('title', 'שיר').replace(",", " ").replace("&", " ")
+            # ניקוי תווים בעייתיים מהכותרת
+            title = info.get('title', 'שיר').replace(",", " ").replace("&", " ").replace("=", " ")
             
             session["step"] = "playing"
             
-            # תיקון: מבנה פקודה רציף ללא תווים שוברים
+            # פקודה רציפה ותקינה להשמעה ובחירה
             return make_yemot_response(
                 f"id_list_message=t-מנגן {title}&"
                 f"play_url={audio_url}&"
