@@ -160,14 +160,23 @@ def play_video(session):
     try:
         with yt_dlp.YoutubeDL(get_yt_options(is_search=False)) as ydl:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={video['id']}", download=False)
-            audio_url = info.get('url')
+            audio_url = info.get('url', '')
             title = info.get('title', 'שיר')
             
             session["step"] = "playing"
-            # ימות המשיח: משמיע את השם, מנגן, ומחכה להקשה לשיר הבא
-            return (f"id_list_message=t-מנגן כעת {title}&"
-                    f"play_url={audio_url}&"
-                    f"read=t-לשיר הבא הקש 2, לתפריט הקש 1=choice,1,1,1,7,st-javascript,y,no")
+            
+            # --- התיקון הקריטי מתחיל כאן ---
+            # קידוד התו '&' על מנת שימות המשיח לא יקטע את הלינק באמצע
+            if audio_url:
+                audio_url = audio_url.replace("&", "%26")
+            
+            # שימוש בפונקציית העזר כדי להחזיר Header ופורמט תקינים
+            return make_yemot_response(
+                f"id_list_message=t-מנגן כעת {title}&"
+                f"play_url={audio_url}&"
+                f"read=t-לשיר הבא הקש 2, לתפריט הקש 1=choice,1,1,1,7,st-javascript,y,no"
+            )
+            # --- התיקון מסתיים כאן ---
                     
     except Exception as e:
         logger.error(f"Play error: {e}")
