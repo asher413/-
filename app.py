@@ -86,12 +86,12 @@ def youtube_main():
         voice_query = get_last("voice_query")
 
         if not selection and not voice_query:
-            # st-voice = חיפוש קולי אמיתי (הקלטה)
+            # תוקן התחביר לתקן של ימות המשיח (ללא פרמטרים שבורים או פסיקים בטקסט)
             return make_yemot_response(
-                "read=t-לשירים חדשים הקש 1. לחיפוש שיר אחר, נא אמרו את שם השיר לאחר הצליל=selection,1,1,1,7,st-voice,y,no"
+                "read=t-לשירים חדשים הקש 1. לחיפוש שיר אחר נא אמרו את שם השיר לאחר הצליל=selection,no,20,1,7"
             )
 
-        # אם המשתמש אמר משהו (זיהוי קולי)
+        # אם המשתמש אמר משהו (זיהוי קולי במשתנה הישן, רק כדי לשמור על הלוגיקה שלך)
         if voice_query:
             session["query"] = voice_query
             return start_search(session)
@@ -101,7 +101,7 @@ def youtube_main():
             session["query"] = "שירים חדשים 2026"
             return start_search(session)
         
-        # אם המערכת זיהתה דיבור בתפריט הראשי (בחלק מההגדרות של ימות)
+        # אם המערכת זיהתה דיבור בתפריט הראשי (נכנס לתוך המשתנה selection)
         if selection and len(selection) > 1:
             session["query"] = selection
             return start_search(session)
@@ -165,18 +165,16 @@ def play_video(session):
             
             session["step"] = "playing"
             
-            # --- התיקון הקריטי מתחיל כאן ---
             # קידוד התו '&' על מנת שימות המשיח לא יקטע את הלינק באמצע
             if audio_url:
                 audio_url = audio_url.replace("&", "%26")
             
-            # שימוש בפונקציית העזר כדי להחזיר Header ופורמט תקינים
+            # תוקן התחביר ל-read תקין ללא פסיקים או פרמטרים שבורים
             return make_yemot_response(
                 f"id_list_message=t-מנגן כעת {title}&"
                 f"play_url={audio_url}&"
-                f"read=t-לשיר הבא הקש 2, לתפריט הקש 1=choice,1,1,1,7,st-javascript,y,no"
+                f"read=t-לשיר הבא הקש 2. לתפריט הקש 1=choice,no,1,1,7"
             )
-            # --- התיקון מסתיים כאן ---
                     
     except Exception as e:
         logger.error(f"Play error: {e}")
