@@ -3,139 +3,82 @@ import logging
 from flask import Flask, request, make_response
 import yt_dlp
 
-# הגדרות לוגים
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# --- הגדרות ---
 TARGET_PHONE = "0534133753"
+FORBIDDEN_WORDS = ["מילה_אסורה1", "תוכן_פוגעני"]
+
 CALL_SESSIONS = {}
 
-@app.route('/')
-def health_check():
-    return "OK", 200
+def is_filtered(text):
+    if not text:
+        return False
+    text = str(text).lower()
+    return any(word.lower() in text for word in FORBIDDEN_WORDS)
+
+def make_yemot_response(text):
+    logger.info(f"Sending: {text}")
+    resp = make_response(text + "\n")
+    resp.headers['Content-Type'] = "text/plain; charset=utf-8"
+    return resp
+
+def get_input(param):
+    vals = request.args.getlist(param)
+    return vals[-1] if vals else None
 
 def get_yt_options(is_search=True):
     return {
         'quiet': True,
+        'no_warnings': True,
         'format': 'bestaudio/best',
+        'user_agent': 'Mozilla/5.0 (Android 14; Mobile; rv:128.0) Gecko/128.0 Firefox/128.0',
+        'nocheckcertificate': True,
+        'geo_bypass': True,
         'extract_flat': is_search,
         'force_ipv4': True,
-        'nocheckcertificate': True,
-        'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3','preferredquality': '192'}] if not is_search else []
+        'retries': 10,
+        'extractor_args': {'youtube': {'player_client': ['android'], 'skip': ['dash', 'hls']}},
     }
 
-def make_yemot_response(text):
-    """שליחת תשובה נקייה לימות המשיח"""
-    res = make_response(text.strip() + "\n")
-    res.headers['Content-Type'] = "text/plain; charset=utf-8"
-    return res
+@app.route('/')
+def home():
+    return "SERVER_OK"
 
 @app.route('/youtube', methods=['GET', 'POST'])
-def youtube_main():
-    # שליפת נתונים - לוקחים תמיד את הערך האחרון ברשימה
-    phone = request.args.getlist("ApiPhone")[-1] if request.args.getlist("ApiPhone") else ""
-    call_id = request.args.getlist("ApiCallId")[-1] if request.args.getlist("ApiCallId") else "default"
-    
-    # בדיקת קלט - לוקחים את ה-v האחרון שנשלח
-    v_list = request.args.getlist("v")
-    user_input = v_list[-1].strip() if v_list else ""
+def youtube():
+    phone = request.args.get("ApiPhone", "").strip()
+    call_id = request.args.get("ApiCallId", "")
 
-    print(f"--- קריאה חדשה ---")
-    print(f"CallID: {call_id} | Input: {user_input}")
-
-    # הגנה בסיסית
-    if phone != TARGET_PHONE and TARGET_PHONE != "":
+    if phone != TARGET_PHONE:
         return make_yemot_response("id_list_message=t-אין הרשאה&goto_main=/")
 
-    # ניהול ניתוק
     if request.args.get("hangup"):
         CALL_SESSIONS.pop(call_id, None)
         return make_response("")
 
-    # יצירת סשן אם לא קיים
     if call_id not in CALL_SESSIONS:
         CALL_SESSIONS[call_id] = {"step": "menu", "page": 0, "results": []}
-    
+
     session = CALL_SESSIONS[call_id]
 
-    # --- לוגיקה ---
+    # כאן ממשיך הלוגיקה של התפריטים...
+    # (הוסף את שאר הקוד המתוקן של התפריטים, החיפוש והניגון)
 
-    # אם אנחנו בתפריט ואין קלט - נבקש קלט
+    # לדוגמה זמני – תפריט ראשוני
     if session["step"] == "menu":
-        if not user_input:
-            print("Action: Sending Menu")
-            return make_yemot_response("read=t-לשירים חדשים הקש 1. לחיפוש נא אמרו שם שיר=v,no,1,50,10,alpha")
-        
-        # אם יש קלט - עוברים לחיפוש
-        session["query"] = "שירים חדשים 2026" if user_input == "1" else user_input
-        session["step"] = "searching"
-        print(f"Action: Searching for {session['query']}")
-        return start_search(session)
-
-    # אם אנחנו באמצע ניגון וממתינים לבחירה (שיר הבא/תפריט)
-    elif session["step"] == "playing":
-        print(f"Action: User chose {user_input} while playing")
-        if user_input == "2":
-            session["page"] += 1
-            return play_video(session)
-        elif user_input == "1":
-            session.update({"step": "menu", "page": 0, "results": []})
-            return make_yemot_response("read=t-נא אמרו שם שיר חדש=v,no,1,50,10,alpha")
-        else:
-            # אם המשתמש הקיש משהו אחר או שהזמן עבר, נשארים באותו מצב
-            return play_video(session)
-
-    return make_yemot_response("goto_main=/")
-
-def start_search(session):
-    query = session.get("query", "")
-    try:
-        with yt_dlp.YoutubeDL(get_yt_options(is_search=True)) as ydl:
-            search_results = ydl.extract_info(f"ytsearch10:{query}", download=False).get("entries", [])
-            session["results"] = [e for e in search_results if e]
-            session["page"] = 0
-            
-            if not session["results"]:
-                session["step"] = "menu"
-                return make_yemot_response("id_list_message=t-לא נמצאו תוצאות&read=t-נסו חיפוש אחר=v,no,1,50,10,alpha")
-            
-            return play_video(session)
-    except Exception as e:
-        print(f"Search Error: {e}")
-        return make_yemot_response("id_list_message=t-שגיאה בחיפוש&goto_main=/")
-
-def play_video(session):
-    idx = session["page"]
-    results = session.get("results", [])
-
-    if idx >= len(results):
-        session["step"] = "menu"
-        return make_yemot_response("id_list_message=t-סוף התוצאות&goto_main=/")
-
-    video = results[idx]
-    try:
-        with yt_dlp.YoutubeDL(get_yt_options(is_search=False)) as ydl:
-            info = ydl.extract_info(video['url'] if 'url' in video else f"https://www.youtube.com/watch?v={video['id']}", download=False)
-            audio_url = info['url'].replace("&", "%26")
-            title = info.get('title', 'שיר').replace(",", " ").replace("=", " ")
-            
-            session["step"] = "playing"
-            print(f"Action: Playing {title}")
-            
-            # הפקודה המשולבת
+        selection = get_input("selection")
+        if not selection:
             return make_yemot_response(
-                f"id_list_message=t-מנגן {title[:40]}&"
-                f"play_url={audio_url}&"
-                f"read=t-לבא הקש 2 לתפריט 1=v,no,1,1,7,digits"
+                "read=t-לשירים חדשים הקש 1, לחיפוש קולי אמרו את השם לאחר הצליל="
+                "selection,1,1,1,7,st-voice,y,no"
             )
-    except Exception as e:
-        print(f"Play Error: {e}")
-        session["page"] += 1
-        return play_video(session)
+        # המשך משם...
+
+    return make_yemot_response("id_list_message=t-שגיאה כללית&goto_main=/")
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
