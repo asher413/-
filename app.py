@@ -177,25 +177,39 @@ def play_current_video(session):
 
     try:
         # 🔥 שימוש ב-Invidious (עוקף חסימה)
-        api_url = f"https://yt.artemislena.eu/api/v1/videos/{video_id}"
-        r = requests.get(api_url, timeout=10)
+        servers = [
+    "https://invidious.fdn.fr",
+    "https://inv.nadeko.net",
+    "https://invidious.privacydev.net"
+]
+
+audio_url = None
+
+for server in servers:
+    try:
+        api_url = f"{server}/api/v1/videos/{video_id}"
+        r = requests.get(api_url, timeout=5)
 
         if r.status_code != 200:
-            raise Exception("API FAILED")
+            continue
 
         data = r.json()
 
-        audio_url = None
-
-        # חיפוש stream אודיו
         for f in data.get("adaptiveFormats", []):
             if "audio" in f.get("type", ""):
                 audio_url = f.get("url")
                 break
 
-        if not audio_url:
-            raise Exception("NO AUDIO")
+        if audio_url:
+            break
 
+    except Exception as e:
+        logger.error(f"SERVER FAILED {server}: {e}")
+        continue
+
+if not audio_url:
+    raise Exception("ALL SERVERS FAILED")
+    
         session["step"] = "waiting_next"
 
         return make_yemot_response(
