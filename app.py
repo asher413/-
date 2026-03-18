@@ -180,18 +180,28 @@ def play_current_video(session, retries=0):
 
     try:
         servers = [
-            "https://invidious.kavin.rocks",
-            "https://yewtu.be",
-            "https://vid.puffyan.us"
+            "https://inv.nadeko.net",
+            "https://invidious.slipfox.xyz",
+            "https://invidious.nerdvpn.de",
+            "https://invidious.protokolla.fi",
+            "https://invidious.private.coffee",
+            "https://iv.ggtyler.dev"
         ]
-
+    
         audio_url = None
 
         for server in servers:
             try:
                 api_url = f"{server}/api/v1/videos/{video_id}"
-                r = requests.get(api_url, timeout=5)
-
+                r = requests.get(
+                    api_url,
+                    timeout=8,
+                    headers={
+                        "User-Agent": "Mozilla/5.0",
+                        "Accept": "application/json"
+                    }
+                )
+                
                 if r.status_code != 200:
                     continue
 
@@ -210,8 +220,10 @@ def play_current_video(session, retries=0):
                 continue
 
         if not audio_url:
-            raise Exception("ALL SERVERS FAILED")
-
+            logger.error("NO AUDIO FOUND - SKIPPING")
+            session["page"] += 1
+            return play_current_video(session)
+    
         session["step"] = "waiting_next"
 
         return make_yemot_response(
