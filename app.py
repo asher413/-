@@ -170,6 +170,10 @@ def play_current_video(session):
     results = session.get("results", [])
     page = session.get("page", 0)
 
+    # הגנה מלולאה אינסופית
+    if page > 10:
+        return make_yemot_response("id_list_message=t-אין אפשרות לנגן&goto_main=/")
+
     if page >= len(results):
         session["step"] = "menu"
         return make_yemot_response("id_list_message=t-אין עוד תוצאות&goto_main=/")
@@ -182,33 +186,59 @@ def play_current_video(session):
 
     # --- ניסיון עם Invidious ---
     servers = [
-        "https://invidious.fdn.fr",
         "https://inv.nadeko.net",
-        "https://invidious.privacydev.net"
+        "https://yewtu.be",
+        "https://invidious.tiekoetter.com",
+        "https://invidious.kavin.rocks",
+        "https://vid.puffyan.us",
+        "https://invidious.privacyredirect.com",
+        "https://invidious.projectsegfau.lt",
+        "https://invidious.fdn.fr",
+        "https://invidious.slipfox.xyz",
+        "https://invidious.nerdvpn.de",
     ]
 
     for server in servers:
         try:
             api_url = f"{server}/api/v1/videos/{video_id}"
-            r = requests.get(api_url, timeout=5)
+
+            r = requests.get(
+                api_url,
+                timeout=6,
+                headers={
+                    "User-Agent": "Mozilla/5.0",
+                    "Accept": "application/json"
+                },
+                verify=False  # עוקף בעיות SSL
+            )
+
             if r.status_code != 200:
                 continue
 
+            # בדיקה שהתגובה JSON אמיתי
+            if "application/json" not in r.headers.get("Content-Type", ""):
+                logger.error(f"NOT JSON FROM {server}")
+                continue
+
             data = r.json()
+
             for f in data.get("adaptiveFormats", []):
                 if "audio" in f.get("type", ""):
                     audio_url = f.get("url")
                     break
+
             if audio_url:
                 break
+
         except Exception as e:
             logger.error(f"SERVER FAILED {server}: {e}")
             continue
 
-    # --- אם Invidious נכשל, yt-dlp רשמי ---
+    # --- fallback ל-yt-dlp אם הכל נכשל ---
     if not audio_url:
         try:
             url = f"https://www.youtube.com/watch?v={video_id}"
+
             ydl_opts = {
                 'quiet': True,
                 'format': 'bestaudio/best',
@@ -228,14 +258,15 @@ def play_current_video(session):
         except Exception as e:
             logger.error(f"YT-DLP ERROR: {e}")
 
-    # --- אם עדיין אין URL, דלג לשיר הבא ---
+    # --- אם עדיין אין אודיו → דילוג ---
     if not audio_url:
-        logger.error("PLAY ERROR: ALL SERVERS FAILED")
+        logger.error("PLAY ERROR: ALL METHODS FAILED - SKIPPING")
         session["page"] += 1
         return play_current_video(session)
 
-    # --- עדכון סשן והחזרת תגובה ---
+    # --- הצלחה ---
     session["step"] = "waiting_next"
+
     return make_yemot_response(
         f"id_list_message=t-מנגן כעת {title}&"
         f"play_url={audio_url}&"
@@ -243,12 +274,9 @@ def play_current_video(session):
     )
     
     except Exception as e:
-        logger.error(f"PLAY ERROR: {e}")
-        if retries >= MAX_RETRIES:
-            session["step"] = "menu"
-            return make_yemot_response("id_list_message=t-אין אפשרות לנגן את השיר&goto_main=/")
+        logger.error(f"YT-DLP ERROR: {e}")
         session["page"] += 1
-        return play_current_video(session, retries=retries+1)
+        return play_current_video(session)
 
 # --- הרצה ---
 if __name__ == "__main__":
