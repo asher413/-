@@ -6,32 +6,31 @@ import yt_dlp
 from urllib.parse import quote
 import requests
 
-# לוגים
+# --- לוגים ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
+# --- בדיקות בריאות ---
 @app.route("/")
-def home_page():  # שים לב ששינינו את השם
+def home_page():
     return "OK"
 
-# --- הגדרות ---
+@app.route("/health")
+def health_check():
+    return "SERVER_OK"
+
+# --- הגדרות כלליות ---
 ACCESS_MODE = "whitelist"
 TARGET_PHONE = "0534133753"
 FORBIDDEN_WORDS = ["מילה_אסורה1", "תוכן_רע"]
-
-# --- זיכרון ---
 SEARCH_CACHE = {}
 CACHE_TIME = 300
 CALL_SESSIONS = {}
+MAX_RETRIES = 3
 
-# --- בדיקת שרת ---
-@app.route('/')
-def home():
-    return "SERVER_OK"
-
-# --- yt-dlp ---
+# --- yt-dlp options ---
 def get_yt_options(is_search=True):
     return {
         'quiet': True,
@@ -64,7 +63,7 @@ def make_yemot_response(text):
     response.headers['Content-Type'] = "text/plain; charset=utf-8"
     return response
 
-# --- API ---
+# --- API מרכזי ---
 @app.route('/youtube', methods=['GET', 'POST'])
 @app.route('/ivr', methods=['GET', 'POST'])
 def youtube_api():
@@ -167,7 +166,7 @@ def start_search(session):
         return make_yemot_response("id_list_message=t-שגיאה בחיפוש&goto_main=/")
 
 # --- ניגון ---
-def play_current_video(session):
+def play_current_video(session, retries=0):
     results = session.get("results", [])
     page = session.get("page", 0)
 
@@ -223,9 +222,12 @@ def play_current_video(session):
 
     except Exception as e:
         logger.error(f"PLAY ERROR: {e}")
+        if retries >= MAX_RETRIES:
+            session["step"] = "menu"
+            return make_yemot_response("id_list_message=t-אין אפשרות לנגן את השיר&goto_main=/")
         session["page"] += 1
-        return play_current_video(session)
-        
+        return play_current_video(session, retries=retries+1)
+
 # --- הרצה ---
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
