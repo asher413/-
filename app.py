@@ -176,40 +176,39 @@ def play_current_video(session):
     title = video.get("title", "שיר")
 
     try:
-        # 🔥 שימוש ב-Invidious (עוקף חסימה)
         servers = [
-    "https://invidious.fdn.fr",
-    "https://inv.nadeko.net",
-    "https://invidious.privacydev.net"
-]
+            "https://invidious.fdn.fr",
+            "https://inv.nadeko.net",
+            "https://invidious.privacydev.net"
+        ]
 
-audio_url = None
+        audio_url = None
 
-for server in servers:
-    try:
-        api_url = f"{server}/api/v1/videos/{video_id}"
-        r = requests.get(api_url, timeout=5)
+        for server in servers:
+            try:
+                api_url = f"{server}/api/v1/videos/{video_id}"
+                r = requests.get(api_url, timeout=5)
 
-        if r.status_code != 200:
-            continue
+                if r.status_code != 200:
+                    continue
 
-        data = r.json()
+                data = r.json()
 
-        for f in data.get("adaptiveFormats", []):
-            if "audio" in f.get("type", ""):
-                audio_url = f.get("url")
-                break
+                for f in data.get("adaptiveFormats", []):
+                    if "audio" in f.get("type", ""):
+                        audio_url = f.get("url")
+                        break
 
-        if audio_url:
-            break
+                if audio_url:
+                    break
 
-    except Exception as e:
-        logger.error(f"SERVER FAILED {server}: {e}")
-        continue
+            except Exception as e:
+                logger.error(f"SERVER FAILED {server}: {e}")
+                continue
 
-if not audio_url:
-    raise Exception("ALL SERVERS FAILED")
-    
+        if not audio_url:
+            raise Exception("ALL SERVERS FAILED")
+
         session["step"] = "waiting_next"
 
         return make_yemot_response(
@@ -219,10 +218,10 @@ if not audio_url:
         )
 
     except Exception as e:
-        logger.error(f"INVIDIOUS ERROR: {e}")
+        logger.error(f"PLAY ERROR: {e}")
         session["page"] += 1
         return play_current_video(session)
-
+        
 # --- הרצה ---
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
