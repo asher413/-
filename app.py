@@ -168,110 +168,93 @@ def start_search(session):
 # --- ניגון ---
 def play_current_video(session):
     results = session.get("results", [])
-    page = session.get("page", 0)
 
-    # הגנה מלולאה אינסופית
-    if page > 10:
-        return make_yemot_response("id_list_message=t-אין אפשרות לנגן&goto_main=/")
+    max_attempts = 10  # הגנה אמיתית
 
-    if page >= len(results):
-        session["step"] = "menu"
-        return make_yemot_response("id_list_message=t-אין עוד תוצאות&goto_main=/")
+    for _ in range(max_attempts):
+        page = session.get("page", 0)
 
-    video = results[page]
-    video_id = video['id']
-    title = video.get("title", "שיר")
+        if page >= len(results):
+            session["step"] = "menu"
+            return make_yemot_response("id_list_message=t-אין עוד תוצאות&goto_main=/")
 
-    audio_url = None
+        video = results[page]
+        video_id = video['id']
+        title = video.get("title", "שיר")
 
-    # --- ניסיון עם Invidious ---
-    servers = [
-        "https://inv.nadeko.net",
-        "https://yewtu.be",
-        "https://invidious.tiekoetter.com",
-        "https://invidious.kavin.rocks",
-        "https://vid.puffyan.us",
-        "https://invidious.privacyredirect.com",
-        "https://invidious.projectsegfau.lt",
-        "https://invidious.fdn.fr",
-        "https://invidious.slipfox.xyz",
-        "https://invidious.nerdvpn.de",
-    ]
+        audio_url = None
 
-    for server in servers:
-        try:
-            api_url = f"{server}/api/v1/videos/{video_id}"
+        # --- Invidious ---
+        servers = [
+            "https://inv.nadeko.net",
+            "https://yewtu.be",
+            "https://vid.puffyan.us",
+        ]
 
-            r = requests.get(
-                api_url,
-                timeout=6,
-                headers={
-                    "User-Agent": "Mozilla/5.0",
-                    "Accept": "application/json"
-                },
-                verify=False  # עוקף בעיות SSL
+        for server in servers:
+            try:
+                r = requests.get(
+                    f"{server}/api/v1/videos/{video_id}",
+                    timeout=4,
+                    headers={"User-Agent": "Mozilla/5.0"},
+                    verify=False
+                )
+
+                if r.status_code != 200:
+                    continue
+
+                if "application/json" not in r.headers.get("Content-Type", ""):
+                    continue
+
+                data = r.json()
+
+                for f in data.get("adaptiveFormats", []):
+                    if "audio" in f.get("type", ""):
+                        audio_url = f.get("url")
+                        break
+
+                if audio_url:
+                    break
+
+            except Exception:
+                continue
+
+        # --- yt-dlp fallback ---
+        if not audio_url:
+            try:
+                url = f"https://www.youtube.com/watch?v={video_id}"
+
+                with yt_dlp.YoutubeDL({
+                    'quiet': True,
+                    'format': 'bestaudio',
+                    'nocheckcertificate': True,
+                    'geo_bypass': True,
+                }) as ydl:
+                    info = ydl.extract_info(url, download=False)
+
+                for f in info.get("formats", []):
+                    if f.get("acodec") != "none":
+                        audio_url = f.get("url")
+                        break
+
+            except Exception as e:
+                logger.error(f"YT-DLP FAILED: {e}")
+
+        # --- הצלחה ---
+        if audio_url:
+            session["step"] = "waiting_next"
+            return make_yemot_response(
+                f"id_list_message=t-מנגן כעת {title}&"
+                f"play_url={audio_url}&"
+                f"read=t-לשיר הבא הקש 2 לתפריט הקש 1=choice,1,1,1,7,st-javascript,y,no"
             )
 
-            if r.status_code != 200:
-                continue
-
-            # בדיקה שהתגובה JSON אמיתי
-            if "application/json" not in r.headers.get("Content-Type", ""):
-                logger.error(f"NOT JSON FROM {server}")
-                continue
-
-            data = r.json()
-
-            for f in data.get("adaptiveFormats", []):
-                if "audio" in f.get("type", ""):
-                    audio_url = f.get("url")
-                    break
-
-            if audio_url:
-                break
-
-        except Exception as e:
-            logger.error(f"SERVER FAILED {server}: {e}")
-            continue
-
-    # --- fallback ל-yt-dlp אם הכל נכשל ---
-    if not audio_url:
-        try:
-            url = f"https://www.youtube.com/watch?v={video_id}"
-
-            ydl_opts = {
-                'quiet': True,
-                'format': 'bestaudio/best',
-                'nocheckcertificate': True,
-                'geo_bypass': True,
-                'force_ipv4': True,
-            }
-
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-
-            for f in info.get("formats", []):
-                if f.get("acodec") != "none":
-                    audio_url = f.get("url")
-                    break
-
-        except Exception as e:
-            logger.error(f"YT-DLP ERROR: {e}")
-
-    # --- אם עדיין אין אודיו → דילוג ---
-    if not audio_url:
-        logger.error("PLAY ERROR: ALL METHODS FAILED - SKIPPING")
+        # --- דילוג לשיר הבא ---
+        logger.error("SKIPPING VIDEO")
         session["page"] += 1
-        return play_current_video(session)
 
-    # --- הצלחה ---
-    session["step"] = "waiting_next"
-
-    return make_yemot_response(
-        f"id_list_message=t-מנגן כעת {title}&"
-        f"play_url={audio_url}&"
-        f"read=t-לשיר הבא הקש 2 לתפריט הקש 1=choice,1,1,1,7,st-javascript,y,no"
-    )
+    # אם הכל נכשל
+    return make_yemot_response("id_list_message=t-אין אפשרות לנגן&goto_main=/")
    
 # --- הרצה ---
 if __name__ == "__main__":
