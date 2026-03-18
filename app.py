@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 @app.route("/")
-def home():
+def home_page():  # שים לב ששינינו את השם
     return "OK"
 
 # --- הגדרות ---
