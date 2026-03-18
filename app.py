@@ -166,7 +166,7 @@ def start_search(session):
         return make_yemot_response("id_list_message=t-שגיאה בחיפוש&goto_main=/")
 
 # --- ניגון ---
-def play_current_video(session, retries=0):
+def play_current_video(session):
     results = session.get("results", [])
     page = session.get("page", 0)
 
@@ -178,60 +178,70 @@ def play_current_video(session, retries=0):
     video_id = video['id']
     title = video.get("title", "שיר")
 
-    try:
-        servers = [
-            "https://inv.nadeko.net",
-            "https://invidious.slipfox.xyz",
-            "https://invidious.nerdvpn.de",
-            "https://invidious.protokolla.fi",
-            "https://invidious.private.coffee",
-            "https://iv.ggtyler.dev"
-        ]
-    
-        audio_url = None
+    audio_url = None
 
-        for server in servers:
-            try:
-                api_url = f"{server}/api/v1/videos/{video_id}"
-                r = requests.get(
-                    api_url,
-                    timeout=8,
-                    headers={
-                        "User-Agent": "Mozilla/5.0",
-                        "Accept": "application/json"
-                    }
-                )
-                
-                if r.status_code != 200:
-                    continue
+    # --- ניסיון עם Invidious ---
+    servers = [
+        "https://invidious.fdn.fr",
+        "https://inv.nadeko.net",
+        "https://invidious.privacydev.net"
+    ]
 
-                data = r.json()
-
-                for f in data.get("adaptiveFormats", []):
-                    if "audio" in f.get("type", ""):
-                        audio_url = f.get("url")
-                        break
-
-                if audio_url:
-                    break
-
-            except Exception as e:
-                logger.error(f"SERVER FAILED {server}: {e}")
+    for server in servers:
+        try:
+            api_url = f"{server}/api/v1/videos/{video_id}"
+            r = requests.get(api_url, timeout=5)
+            if r.status_code != 200:
                 continue
 
-        if not audio_url:
-            logger.error("NO AUDIO FOUND - SKIPPING")
-            session["page"] += 1
-            return play_current_video(session)
+            data = r.json()
+            for f in data.get("adaptiveFormats", []):
+                if "audio" in f.get("type", ""):
+                    audio_url = f.get("url")
+                    break
+            if audio_url:
+                break
+        except Exception as e:
+            logger.error(f"SERVER FAILED {server}: {e}")
+            continue
+
+    # --- אם Invidious נכשל, yt-dlp רשמי ---
+    if not audio_url:
+        try:
+            url = f"https://www.youtube.com/watch?v={video_id}"
+            ydl_opts = {
+                'quiet': True,
+                'format': 'bestaudio/best',
+                'nocheckcertificate': True,
+                'geo_bypass': True,
+                'force_ipv4': True,
+            }
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+
+            for f in info.get("formats", []):
+                if f.get("acodec") != "none":
+                    audio_url = f.get("url")
+                    break
+
+        except Exception as e:
+            logger.error(f"YT-DLP ERROR: {e}")
+
+    # --- אם עדיין אין URL, דלג לשיר הבא ---
+    if not audio_url:
+        logger.error("PLAY ERROR: ALL SERVERS FAILED")
+        session["page"] += 1
+        return play_current_video(session)
+
+    # --- עדכון סשן והחזרת תגובה ---
+    session["step"] = "waiting_next"
+    return make_yemot_response(
+        f"id_list_message=t-מנגן כעת {title}&"
+        f"play_url={audio_url}&"
+        f"read=t-לשיר הבא הקש 2 לתפריט הקש 1=choice,1,1,1,7,st-javascript,y,no"
+    )
     
-        session["step"] = "waiting_next"
-
-        return make_yemot_response(
-            f"id_list_message=t-מנגן כעת {title}&"
-            f"play_url={audio_url}&"
-            f"read=t-לשיר הבא הקש 2 לתפריט הקש 1=choice,1,1,1,7,st-javascript,y,no"
-        )
-
     except Exception as e:
         logger.error(f"PLAY ERROR: {e}")
         if retries >= MAX_RETRIES:
