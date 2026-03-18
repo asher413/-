@@ -12,6 +12,10 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
+@app.route("/")
+def home():
+    return "OK"
+
 # --- הגדרות ---
 ACCESS_MODE = "whitelist"
 TARGET_PHONE = "0534133753"
