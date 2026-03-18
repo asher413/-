@@ -58,6 +58,7 @@ def make_yemot_response(text):
     return response
 
 # --- API ---
+@app.route('/youtube', methods=['GET', 'POST'])
 @app.route('/ivr', methods=['GET', 'POST'])
 def youtube_api():
     phone = request.args.get("ApiPhone", "").strip()
