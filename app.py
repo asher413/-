@@ -36,8 +36,11 @@ def get_yt_options(is_search=True):
         'geo_bypass': True,
         'extract_flat': is_search,
         'force_ipv4': True,
-        'retries': 10,
+        'retries': 5,
         'noplaylist': True,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+        },
         'extractor_args': {
             'youtube': {
                 'player_client': ['android', 'web'],
@@ -174,8 +177,24 @@ def play_current_video(session):
         with yt_dlp.YoutubeDL(get_yt_options(False)) as ydl:
             info = ydl.extract_info(url, download=False)
 
-        audio_url = info.get("url")
         title = info.get("title", "שיר")
+
+        formats = info.get("formats", [])
+        audio_url = None
+
+        for f in formats:
+            if f.get("ext") == "m4a" and f.get("acodec") != "none":
+                audio_url = f.get("url")
+                break
+
+        if not audio_url:
+            audio_url = info.get("url")
+
+        # 🔴 אם עדיין אין אודיו → דלג
+        if not audio_url:
+            logger.error("NO AUDIO - SKIPPING")
+            session["page"] += 1
+            return play_current_video(session)
 
         session["step"] = "waiting_next"
 
@@ -188,6 +207,7 @@ def play_current_video(session):
     except Exception as e:
         logger.error(f"PLAY ERROR: {e}")
         session["page"] += 1
+        time.sleep(1)
         return play_current_video(session)
 
 # --- הרצה ---
