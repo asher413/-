@@ -272,12 +272,7 @@ def play_current_video(session):
         f"play_url={audio_url}&"
         f"read=t-לשיר הבא הקש 2 לתפריט הקש 1=choice,1,1,1,7,st-javascript,y,no"
     )
-    
-    except Exception as e:
-        logger.error(f"YT-DLP ERROR: {e}")
-        session["page"] += 1
-        return play_current_video(session)
-
+   
 # --- הרצה ---
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
