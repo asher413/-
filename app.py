@@ -95,7 +95,7 @@ def youtube_api():
 
         if not selection:
             return make_yemot_response(
-                "read=t-לשירים חדשים הקש 1 לחיפוש קולי הקש 2=selection,1,1,1,7,st-javascript,y,no"
+                "read=t-לשירים חדשים הקש 1 לחיפוש קולי הקש 2=selection,1,1,1,7,st-digits,y,no"
             )
 
         if selection == "1":
