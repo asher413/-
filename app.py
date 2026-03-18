@@ -180,10 +180,10 @@ def play_current_video(session, retries=0):
 
     try:
         servers = [
-            "https://invidious.fdn.fr",
-            "https://inv.nadeko.net",
-            "https://invidious.privacydev.net"
-        ]
+         "https://invidious.kavin.rocks",
+         "https://yewtu.be",
+         "https://vid.puffyan.us"
+    ]
 
         audio_url = None
 
