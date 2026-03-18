@@ -31,17 +31,16 @@ def get_yt_options(is_search=True):
     return {
         'quiet': True,
         'no_warnings': True,
-        'format': 'bestaudio/best',
-        'user_agent': 'Mozilla/5.0 (Android 14)',
+        'format': 'bestaudio[ext=m4a]/bestaudio/best',
         'nocheckcertificate': True,
         'geo_bypass': True,
         'extract_flat': is_search,
         'force_ipv4': True,
         'retries': 10,
+        'noplaylist': True,
         'extractor_args': {
             'youtube': {
-                'player_client': ['android'],
-                'skip': ['dash', 'hls']
+                'player_client': ['android', 'web'],
             }
         }
     }
