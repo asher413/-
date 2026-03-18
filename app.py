@@ -4,6 +4,7 @@ import logging
 from flask import Flask, request, make_response
 import yt_dlp
 from urllib.parse import quote
+import requests
 
 # לוגים
 logging.basicConfig(level=logging.INFO)
@@ -171,30 +172,29 @@ def play_current_video(session):
         return make_yemot_response("id_list_message=t-אין עוד תוצאות&goto_main=/")
 
     video = results[page]
-    url = f"https://www.youtube.com/watch?v={video['id']}"
+    video_id = video['id']
+    title = video.get("title", "שיר")
 
     try:
-        with yt_dlp.YoutubeDL(get_yt_options(False)) as ydl:
-            info = ydl.extract_info(url, download=False)
+        # 🔥 שימוש ב-Invidious (עוקף חסימה)
+        api_url = f"https://yt.artemislena.eu/api/v1/videos/{video_id}"
+        r = requests.get(api_url, timeout=10)
 
-        title = info.get("title", "שיר")
+        if r.status_code != 200:
+            raise Exception("API FAILED")
 
-        formats = info.get("formats", [])
+        data = r.json()
+
         audio_url = None
 
-        for f in formats:
-            if f.get("ext") == "m4a" and f.get("acodec") != "none":
+        # חיפוש stream אודיו
+        for f in data.get("adaptiveFormats", []):
+            if "audio" in f.get("type", ""):
                 audio_url = f.get("url")
                 break
 
         if not audio_url:
-            audio_url = info.get("url")
-
-        # 🔴 אם עדיין אין אודיו → דלג
-        if not audio_url:
-            logger.error("NO AUDIO - SKIPPING")
-            session["page"] += 1
-            return play_current_video(session)
+            raise Exception("NO AUDIO")
 
         session["step"] = "waiting_next"
 
@@ -205,9 +205,8 @@ def play_current_video(session):
         )
 
     except Exception as e:
-        logger.error(f"PLAY ERROR: {e}")
+        logger.error(f"INVIDIOUS ERROR: {e}")
         session["page"] += 1
-        time.sleep(1)
         return play_current_video(session)
 
 # --- הרצה ---
