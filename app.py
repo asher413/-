@@ -63,14 +63,17 @@ def make_yemot_response(text):
     response.headers['Content-Type'] = "text/plain; charset=utf-8"
     return response
 
-# --- API מרכזי ---
+# --- API מרכזי משופר ---
 @app.route('/youtube', methods=['GET', 'POST'])
 @app.route('/ivr', methods=['GET', 'POST'])
 def youtube_api():
     phone = request.args.get("ApiPhone", "").strip()
     call_id = request.args.get("ApiCallId", "")
+    selection = request.args.get("selection")
+    query = request.args.get("query")
+    choice = request.args.get("choice")
 
-    logger.info(f"DEBUG phone={phone}")
+    logger.info(f"DEBUG phone={phone} | step={CALL_SESSIONS.get(call_id, {}).get('step')}")
 
     # הרשאה
     if phone != TARGET_PHONE:
@@ -81,66 +84,49 @@ def youtube_api():
         CALL_SESSIONS.pop(call_id, None)
         return make_yemot_response("goto_main=/")
 
-    # יצירת סשן
+    # יצירת סשן אם לא קיים
     if call_id not in CALL_SESSIONS:
-        CALL_SESSIONS[call_id] = {
-            "step": "menu",
-            "page": 0,
-            "results": []
-        }
+        CALL_SESSIONS[call_id] = {"step": "menu", "page": 0, "results": []}
 
     session = CALL_SESSIONS[call_id]
 
-    def get_input(name):
-        vals = request.args.getlist(name)
-        return vals[-1] if vals else None
+    # --- לוגיקה לפי שלבים ---
+    
+    # 1. תפריט ראשי
+    if not selection and not query and not choice:
+        session["step"] = "menu"
+        return make_yemot_response(
+            "read=t-לשירים חדשים הקש 1 לחיפוש קולי הקש 2=selection,1,1,1,7,st-digits,y,no"
+        )
 
-    # --- תפריט ---
-    if session["step"] == "menu":
-        selection = get_input("selection")
-
-        if not selection:
-            return make_yemot_response(
-                "read=t-לשירים חדשים הקש 1 לחיפוש קולי הקש 2=selection,1,1,1,7,st-digits,y,no"
-            )
-
-        if selection == "1":
-            session["query"] = "שירים חדשים 2026"
-            return start_search(session)
-
-        elif selection == "2":
-            session["step"] = "ask_query"
-            return make_yemot_response(
-                "read=t-נא אמרו את שם השיר=query,1,1,1,7,st-voice,y,no"
-            )
-
-    elif session["step"] == "ask_query":
-        query = get_input("query")
-
-        if not query:
-            return make_yemot_response(
-                "read=t-לא שמעתי, נא אמרו שוב=query,1,1,1,7,st-voice,y,no"
-            )
-
-        session["query"] = query
+    # 2. טיפול בבחירה מהתפריט
+    if selection == "1" and session["step"] == "menu":
+        session["query"] = "שירים חדשים 2026"
+        session["step"] = "searching"
         return start_search(session)
 
-    elif session["step"] == "waiting_next":
-        choice = get_input("choice")
+    if selection == "2" and session["step"] == "menu":
+        session["step"] = "ask_query"
+        return make_yemot_response("read=t-נא אמרו את שם השיר=query,1,1,1,7,st-voice,y,no")
 
-        if choice == "2":
-            session["page"] += 1
-            return play_current_video(session)
+    # 3. קבלת חיפוש קולי
+    if query and session["step"] == "ask_query":
+        session["query"] = query
+        session["step"] = "searching"
+        return start_search(session)
 
-        elif choice == "1":
-            session["step"] = "menu"
-            return make_yemot_response("goto_main=/")
+    # 4. מעבר בין שירים
+    if choice == "2":
+        session["page"] += 1
+        return play_current_video(session)
+    
+    if choice == "1":
+        session["step"] = "menu"
+        return make_yemot_response("goto_main=/")
 
-        else:
-            return play_current_video(session)
-
+    # אם הגענו לכאן ואין מה לעשות, נחזור לתפריט במקום להתנתק
     return make_yemot_response("goto_main=/")
-
+    
 # --- חיפוש ---
 def start_search(session):
     query = session.get("query", "שירים")
