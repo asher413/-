@@ -1,9 +1,7 @@
 import os
-import time
 import logging
 from flask import Flask, request, make_response, Response, stream_with_context
 import yt_dlp
-from urllib.parse import quote
 import requests
 
 # --- לוגים ---
@@ -12,198 +10,110 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# --- בדיקות בריאות ---
+# --- הגדרות ---
+TARGET_PHONE = "0534133753" # הטלפון המורשה
+# כאן שנה לכתובת האמיתית של השרת שלך ב-Render
+BASE_URL = "https://my-yt-phone.onrender.com" 
+
 @app.route("/")
-def home_page():
-    return "OK"
-
-@app.route("/health")
-def health_check():
-    return "SERVER_OK"
-
-# --- הגדרות כלליות ---
-ACCESS_MODE = "whitelist"
-TARGET_PHONE = "0534133753"
-FORBIDDEN_WORDS = ["מילה_אסורה1", "תוכן_רע"]
-SEARCH_CACHE = {}
-CACHE_TIME = 300
-CALL_SESSIONS = {}
-MAX_RETRIES = 3
-
-# --- yt-dlp options ---
-def get_yt_options(is_search=True):
-    return {
-        'quiet': True,
-        'no_warnings': True,
-        'format': 'bestaudio[ext=m4a]/bestaudio/best',
-        'nocheckcertificate': True,
-        'geo_bypass': True,
-        'extract_flat': is_search,
-        'force_ipv4': True,
-        'retries': 5,
-        'noplaylist': True,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-        },
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'web'],
-            }
-        }
-    }
-
-def is_filtered(text):
-    if not text:
-        return False
-    return any(word in text for word in FORBIDDEN_WORDS)
+def home(): return "OK"
 
 def make_yemot_response(text):
-    logger.info(f"RESPONSE: {text}")
     response = make_response(text + "\n")
     response.headers['Content-Type'] = "text/plain; charset=utf-8"
     return response
 
-# --- API מרכזי משופר ---
+# --- API מרכזי ---
 @app.route('/youtube', methods=['GET', 'POST'])
-@app.route('/ivr', methods=['GET', 'POST'])
 def youtube_api():
     phone = request.args.get("ApiPhone", "").strip()
-    call_id = request.args.get("ApiCallId", "")
-    selection = request.args.get("selection")
-    query = request.args.get("query")
-    choice = request.args.get("choice")
-
-    logger.info(f"DEBUG phone={phone} | step={CALL_SESSIONS.get(call_id, {}).get('step')}")
-
-    # הרשאה
+    # בדיקת הרשאה
     if phone != TARGET_PHONE:
         return make_yemot_response("id_list_message=t-אין לך הרשאה&goto_main=/")
 
-    # ניתוק
-    if request.args.get("hangup"):
-        CALL_SESSIONS.pop(call_id, None)
+    # קבלת פרמטרים מה-URL (הסטייט שלנו)
+    step = request.args.get("step", "menu")
+    query = request.args.get("query")
+    page = int(request.args.get("page", 0))
+    
+    # קבלת קלט מהמשתמש
+    selection = request.args.get("selection")
+    choice = request.args.get("choice")
+    voice_query = request.args.get("voice_query")
+
+    # --- תפריט ראשי ---
+    if step == "menu":
+        if not selection:
+            return make_yemot_response(
+                "read=t-לשירים חדשים הקש 1 לחיפוש קולי הקש 2=selection,1,1,1,7,st-digits,y,no"
+            )
+        
+        if selection == "1":
+            return start_search("שירים חדשים 2026", 0)
+        elif selection == "2":
+            return make_yemot_response(
+                f"read=t-נא אמרו את שם השיר=voice_query,1,1,1,7,st-voice,y,no&step=ask_voice"
+            )
+
+    # --- טיפול בחיפוש קולי ---
+    if step == "ask_voice":
+        if not voice_query:
+            return make_yemot_response("id_list_message=t-לא שמעתי&goto_main=/")
+        return start_search(voice_query, 0)
+
+    # --- מעבר בין שירים ---
+    if choice == "2": # שיר הבא
+        return start_search(query, page + 1)
+    elif choice == "1": # חזרה לתפריט
         return make_yemot_response("goto_main=/")
 
-    # יצירת סשן אם לא קיים
-    if call_id not in CALL_SESSIONS:
-        CALL_SESSIONS[call_id] = {"step": "menu", "page": 0, "results": []}
-
-    session = CALL_SESSIONS[call_id]
-
-    # --- לוגיקה לפי שלבים ---
-    
-    # 1. תפריט ראשי
-    if not selection and not query and not choice:
-        session["step"] = "menu"
-        return make_yemot_response(
-            "read=t-לשירים חדשים הקש 1 לחיפוש קולי הקש 2=selection,1,1,1,7,st-digits,y,no"
-        )
-
-    # 2. טיפול בבחירה מהתפריט
-    if selection == "1" and session["step"] == "menu":
-        session["query"] = "שירים חדשים 2026"
-        session["step"] = "searching"
-        return start_search(session)
-
-    if selection == "2" and session["step"] == "menu":
-        session["step"] = "ask_query"
-        return make_yemot_response("read=t-נא אמרו את שם השיר=query,1,1,1,7,st-voice,y,no")
-
-    # 3. קבלת חיפוש קולי
-    if query and session["step"] == "ask_query":
-        session["query"] = query
-        session["step"] = "searching"
-        return start_search(session)
-
-    # 4. מעבר בין שירים
-    if choice == "2":
-        session["page"] += 1
-        return play_current_video(session)
-    
-    if choice == "1":
-        session["step"] = "menu"
-        return make_yemot_response("goto_main=/")
-
-    # אם הגענו לכאן ואין מה לעשות, נחזור לתפריט במקום להתנתק
     return make_yemot_response("goto_main=/")
-    
-# --- חיפוש ---
-def start_search(session):
-    query = session.get("query", "שירים")
-    search_string = f"ytsearch10:{query}"
 
+def start_search(query_text, page_index):
+    search_string = f"ytsearch10:{query_text}"
     try:
-        with yt_dlp.YoutubeDL(get_yt_options(True)) as ydl:
+        with yt_dlp.YoutubeDL({'quiet': True, 'extract_flat': True}) as ydl:
             info = ydl.extract_info(search_string, download=False)
+            results = info.get("entries", [])
 
-        entries = info.get("entries", [])
-        results = [e for e in entries if not is_filtered(e.get("title"))]
+        if not results or page_index >= len(results):
+            return make_yemot_response("id_list_message=t-אין תוצאות נוספות&goto_main=/")
 
-        if not results:
-            return make_yemot_response("id_list_message=t-לא נמצאו תוצאות&goto_main=/")
-
-        session["results"] = results
-        session["page"] = 0
-
-        return play_current_video(session)
-
+        video = results[page_index]
+        v_id = video['id']
+        title = video.get("title", "שיר")
+        
+        # בניית הקישורים עם הפרמטרים שיחזרו אלינו בבקשה הבאה
+        stream_url = f"{BASE_URL}/stream?v={v_id}"
+        next_params = f"&step=play&query={query_text}&page={page_index}"
+        
+        return make_yemot_response(
+            f"id_list_message=t-מנגן כעת {title}&"
+            f"play_url={stream_url}&"
+            f"read=t-לשיר הבא הקש 2 לתפריט הקש 1=choice,1,1,1,7,st-digits,y,no{next_params}"
+        )
     except Exception as e:
-        logger.error(f"SEARCH ERROR: {e}")
+        logger.error(f"Search error: {e}")
         return make_yemot_response("id_list_message=t-שגיאה בחיפוש&goto_main=/")
 
-# --- הזרמת שמע ישירות מהשרת שלך ---
+# --- הזרמת השמע ---
 @app.route('/stream')
 def stream_audio():
     video_id = request.args.get('v')
-    if not video_id:
-        return "Missing video id", 400
-        
-    url = f"https://www.youtube.com/watch?v={video_id}"
+    if not video_id: return "Missing ID", 400
     
     try:
         with yt_dlp.YoutubeDL({'format': 'bestaudio', 'quiet': True}) as ydl:
-            info = ydl.extract_info(url, download=False)
-            audio_url = None
-            for f in info.get("formats", []):
-                if f.get("acodec") != "none":
-                    audio_url = f.get("url")
-                    break
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+            audio_url = next((f['url'] for f in info.get("formats", []) if f.get("acodec") != "none"), None)
             
-            if not audio_url:
-                return "Audio not found", 404
+        if not audio_url: return "Not found", 404
 
-        # מזרים את השמע דרך השרת שלך
         req = requests.get(audio_url, stream=True)
-        return Response(stream_with_context(req.iter_content(chunk_size=1024)), content_type=req.headers.get('content-type', 'audio/mp4'))
+        return Response(stream_with_context(req.iter_content(chunk_size=1024)), 
+                        content_type=req.headers.get('content-type', 'audio/mp4'))
     except Exception as e:
-        logger.error(f"STREAM ERROR: {e}")
-        return "Error", 500
+        return str(e), 500
 
-# --- ניגון ---
-def play_current_video(session):
-    results = session.get("results", [])
-    page = session.get("page", 0)
-
-    if page >= len(results):
-        session["step"] = "menu"
-        return make_yemot_response("id_list_message=t-אין עוד תוצאות&goto_main=/")
-
-    video = results[page]
-    video_id = video['id']
-    title = video.get("title", "שיר")
-
-    # <<< שים לב: אל תשכח לשנות את הכתובת הזו לכתובת האמיתית של השרת שלך >>>
-    my_server_url = "https://my-yt-phone.onrender.com" 
-    stream_url = f"{my_server_url}/stream?v={video_id}"
-
-    session["step"] = "waiting_next"
-    return make_yemot_response(
-        f"id_list_message=t-מנגן כעת {title}&"
-        f"play_url={stream_url}&"
-        f"read=t-לשיר הבא הקש 2 לתפריט הקש 1=choice,1,1,1,7,st-javascript,y,no"
-    )
-   
-# --- הרצה ---
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
