@@ -27,7 +27,7 @@ CALL_SESSIONS = {}
 SEARCH_CACHE = {}
 CACHE_TIME = 300
 
-# 🔥 שרת Invidious (אפשר להחליף אם נופל)
+# --- רשימת שרתי Invidious יציבים והחלפה אוטומטית - Code by LEMON SHLIF ---
 INVIDIOUS_SERVERS = [
     "https://vid.puffyan.us/api/v1",
     "https://inv.nadeko.net/api/v1",
@@ -37,7 +37,19 @@ INVIDIOUS_SERVERS = [
 
 CURRENT_INVIDIOUS = 0
 
-AUDIO_CACHE = {}
+def get_working_invidious():
+    global CURRENT_INVIDIOUS
+    for i in range(len(INVIDIOUS_SERVERS)):
+        idx = (CURRENT_INVIDIOUS + i) % len(INVIDIOUS_SERVERS)
+        test_url = INVIDIOUS_SERVERS[idx] + "/stats"
+        try:
+            r = requests.get(test_url, timeout=2)
+            if r.status_code == 200:
+                CURRENT_INVIDIOUS = idx
+                return INVIDIOUS_SERVERS[idx]
+        except:
+            continue
+    return INVIDIOUS_SERVERS[0]
 
 def is_filtered(text):
     if not text:
