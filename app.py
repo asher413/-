@@ -92,13 +92,14 @@ def youtube_api():
 
     # --- לוגיקה לפי שלבים ---
     
-    # 1. תפריט ראשי
+    # אל תאפס אם כבר באמצע ניגון
     if not selection and not query and not choice:
-        session["step"] = "menu"
-        return make_yemot_response(
-            "read=t-לשירים חדשים הקש 1 לחיפוש קולי הקש 2=selection,1,1,1,7,st-digits,y,no"
-        )
-
+        if session.get("step") != "waiting_next":
+            session["step"] = "menu"
+            return make_yemot_response(
+                "read=t-לשירים חדשים הקש 1 לחיפוש קולי הקש 2=selection,1,1,1,7,st-digits,y,no"
+            )
+        
     # 2. טיפול בבחירה מהתפריט
     if selection == "1" and session["step"] == "menu":
         session["query"] = "שירים חדשים 2026"
@@ -180,6 +181,7 @@ def stream_audio():
         return "Error", 500
 
 # --- ניגון ---
+# ניגון עם URL ישיר (בלי /stream)
 def play_current_video(session):
     results = session.get("results", [])
     page = session.get("page", 0)
@@ -187,6 +189,29 @@ def play_current_video(session):
     if page >= len(results):
         session["step"] = "menu"
         return make_yemot_response("id_list_message=t-אין עוד תוצאות&goto_main=/")
+
+    video = results[page]
+    video_id = video['id']
+    title = video.get("title", "שיר")
+
+    stream_url = get_audio_url(video_id)
+
+    session["step"] = "waiting_next"
+    return make_yemot_response(
+        f"id_list_message=t-מנגן כעת {title}&"
+        f"play_url={stream_url}&"
+        f"read=t-לשיר הבא הקש 2 לתפריט הקש 1=choice,1,1,1,7,st-javascript,y,no"
+    )
+
+# מחזיר URL ישיר לאודיו מיוטיוב בלי סטרימינג דרך השרת
+def get_audio_url(video_id):
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    with yt_dlp.YoutubeDL({'format': 'bestaudio', 'quiet': True}) as ydl:
+        info = ydl.extract_info(url, download=False)
+        for f in info.get("formats", []):
+            if f.get("acodec") != "none":
+                return f.get("url")
+    return None
 
     video = results[page]
     video_id = video['id']
