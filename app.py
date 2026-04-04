@@ -36,17 +36,16 @@ def youtube_api():
     if step == "menu" and not selection:
         return make_yemot_response("read=t-לשירים חדשים הקש 1 לחיפוש קולי הקש 2=selection,1,1,1,7,st-digits,y,no")
 
-    # חיפוש שירים (רק 3 תוצאות לחיסכון בזיכרון)
+    # חיפוש שירים - כאן הגדרנו שירים חדשים
     if selection == "1":
-        return start_search("שירים חדשים 2026", 0)
+        return start_search("שירים ישראלים חדשים 2026", 0, sort_by_date=True)
 
     if choice == "2":
-        return start_search(query, page + 1)
+        return start_search(query, page + 1, sort_by_date=(step == "play_new"))
 
     return make_yemot_response("goto_main=/")
 
-def start_search(query_text, page_index):
-    # הגדרות רזות מאוד כדי לא להפיל את השרת
+def start_search(query_text, page_index, sort_by_date=False):
     ydl_opts = {
         'quiet': True,
         'extract_flat': True,
@@ -55,10 +54,16 @@ def start_search(query_text, page_index):
         'extractor_args': {'youtube': {'player_client': ['ios']}}
     }
     
+    # הוספת סינון לפי תאריך אם מדובר בשירים חדשים
+    if sort_by_date:
+        ydl_opts['playlist_items'] = '1,2,3,4,5' # לוקח את ה-5 הראשונים
+        # בחיפוש שטוח (flat) יוטיוב מחזיר לפי הרלוונטיות, 
+        # כדי לקבל תאריך מדויק נשתמש במילת חיפוש ממוקדת יותר
+        query_text = f"{query_text} upload_date"
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # מחפשים רק 3 תוצאות במקום 5 או 10
-            info = ydl.extract_info(f"ytsearch3:{query_text}", download=False)
+            info = ydl.extract_info(f"ytsearch5:{query_text}", download=False)
             results = info.get("entries", [])
 
         if not results or page_index >= len(results):
@@ -66,17 +71,20 @@ def start_search(query_text, page_index):
 
         video = results[page_index]
         v_id = video['id']
-        title = video.get("title", "שיר").replace("&", "ו") # ניקוי תווים בעייתיים
+        title = video.get("title", "שיר").replace("&", "ו").replace("|", "-")
         
         stream_url = f"{BASE_URL}/stream?v={v_id}"
+        # שומרים את הסטייט כדי לדעת אם להמשיך לחפש "חדשים" בשיר הבא
+        step_name = "play_new" if sort_by_date else "play"
+        
         return make_yemot_response(
             f"id_list_message=t-מנגן {title}&"
             f"play_url={stream_url}&"
-            f"read=t-לבא הקש 2=choice,1,1,1,7,st-digits,y,no&step=play&query={query_text}&page={page_index}"
+            f"read=t-לשיר הבא הקש 2=choice,1,1,1,7,st-digits,y,no&step={step_name}&query={query_text}&page={page_index}"
         )
     except Exception as e:
         logger.error(f"Search error: {e}")
-        return make_yemot_response("id_list_message=t-שגיאה, נסה שוב&goto_main=/")
+        return make_yemot_response("id_list_message=t-שגיאה בחיפוש&goto_main=/")
 
 @app.route('/stream')
 def stream_audio():
@@ -84,7 +92,7 @@ def stream_audio():
     if not video_id: return "No ID", 400
         
     ydl_opts = {
-        'format': 'wa*[vcodec=none]/ba', # בוחר את פורמט השמע הכי קל
+        'format': 'ba/b', # איכות בסיסית ומהירה
         'quiet': True,
         'force_ipv4': True,
         'extractor_args': {'youtube': {'player_client': ['ios']}}
@@ -96,7 +104,7 @@ def stream_audio():
             url = info.get('url')
             
         req = requests.get(url, stream=True, headers={'User-Agent': 'Mozilla/5.0'}, timeout=15)
-        return Response(stream_with_context(req.iter_content(chunk_size=8192)), 
+        return Response(stream_with_context(req.iter_content(chunk_size=1024*16)), 
                         content_type=req.headers.get('content-type'))
     except Exception as e:
         logger.error(f"Stream error: {e}")
