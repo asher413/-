@@ -173,46 +173,61 @@ def start_search(session):
     return make_yemot_response("id_list_message=t-שגיאה בחיפוש&goto_main=/")
 
 # --- שליפת אודיו ישיר (בלי סטרימינג) ---
+# שליפת אודיו עם timeout והגנה מקריסה - Code by LEMON SHLIF
 def get_audio_url(video_id):
     try:
         url = f"https://www.youtube.com/watch?v={video_id}"
-        with yt_dlp.YoutubeDL(get_yt_options(False)) as ydl:
+
+        ydl_opts = get_yt_options(False)
+        ydl_opts.update({
+            'socket_timeout': 5,
+        })
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
 
             for f in info.get("formats", []):
                 if f.get("acodec") != "none":
                     return f.get("url")
+
     except Exception as e:
         logger.error(f"AUDIO ERROR: {e}")
 
     return None
 
 # --- ניגון ---
+# ניגון בלי קריסה + דילוג בטוח על שירים חסומים - Code by LEMON SHLIF
 def play_current_video(session):
     results = session.get("results", [])
     page = session.get("page", 0)
 
-    if page >= len(results):
-        session["step"] = "menu"
-        return make_yemot_response("id_list_message=t-אין עוד תוצאות&goto_main=/")
+    max_attempts = 5
+    attempts = 0
 
-    video = results[page]
-    video_id = video['id']
-    title = video.get("title", "שיר")
+    while page < len(results) and attempts < max_attempts:
+        video = results[page]
+        video_id = video['id']
+        title = video.get("title", "שיר")
 
-    audio_url = get_audio_url(video_id)
+        audio_url = get_audio_url(video_id)
 
-    if not audio_url:
-        session["page"] += 1
-        return play_current_video(session)
+        if audio_url:
+            session["page"] = page
+            session["step"] = "waiting_next"
 
-    session["step"] = "waiting_next"
+            return make_yemot_response(
+                f"id_list_message=t-מנגן כעת {title}&"
+                f"play_url={audio_url}&"
+                f"read=t-לשיר הבא הקש 2 לתפריט הקש 1=choice,1,1,1,7,st-javascript,y,no"
+            )
 
-    return make_yemot_response(
-        f"id_list_message=t-מנגן כעת {title}&"
-        f"play_url={audio_url}&"
-        f"read=t-לשיר הבא הקש 2 לתפריט הקש 1=choice,1,1,1,7,st-javascript,y,no"
-    )
+        # אם נחסם → דלג
+        page += 1
+        attempts += 1
+
+    # אם לא נמצא כלום
+    session["step"] = "menu"
+    return make_yemot_response("id_list_message=t-לא ניתן לנגן כרגע נסה שוב&goto_main=/")
 
 # --- הרצה ---
 if __name__ == "__main__":
