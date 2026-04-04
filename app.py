@@ -30,47 +30,51 @@ def youtube_api():
     choice = request.args.get("choice")
     page = int(request.args.get("page", 0))
 
-    # תפריט ראשי
     if not selection and not choice:
         return make_yemot_response("read=t-לשירים חדשים מהיום הקש 1 לחיפוש הקש 2=selection,1,1,1,7,st-digits,y,no")
 
-    # אם הקש 1 - נביא פלאייליסט של שירים חדשים (עוקף חסימה ומהיר יותר)
-    if selection == "1" or choice == "2":
-        # כתובת פלאייליסט של שירים חדשים (מתעדכן אוטומטית ביוטיוב)
-        playlist_url = "https://www.youtube.com/playlist?list=PLwREvA_X0N9fVshY8D6f1_Y4T6o6WnFzT" # דוגמה לפלאייליסט להיטים
-        return play_from_url(playlist_url, page)
+    # חיפוש שירים חדשים לפי תאריך העלאה
+    if selection == "1" or (choice == "2" and request.args.get("mode") == "new"):
+        return start_search("שירים ישראלים חדשים 2026", page, is_new=True)
 
     return make_yemot_response("goto_main=/")
 
-def play_from_url(url, index):
+def start_search(query_text, page_index, is_new=False):
     ydl_opts = {
         'quiet': True,
         'extract_flat': True,
         'force_ipv4': True,
-        'playlist_items': str(index + 1),
+        'playlist_items': str(page_index + 1),
         'extractor_args': {'youtube': {'player_client': ['ios']}}
     }
     
+    # אם ביקשת חדשים - נשתמש בחיפוש ממוקד תאריך
+    search_query = f"ytsearch10:{query_text}"
+    if is_new:
+        # פקודה ליוטיוב להביא לפי תאריך העלאה
+        ydl_opts['search_filters'] = 'upload_date' 
+    
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            entries = info.get("entries", [])
+            info = ydl.extract_info(search_query, download=False)
+            results = info.get("entries", [])
             
-            if not entries:
-                return make_yemot_response("id_list_message=t-אין שירים חדשים כרגע&goto_main=/")
+            if not results or page_index >= len(results):
+                return make_yemot_response("id_list_message=t-אין תוצאות נוספות&goto_main=/")
             
-            video = entries[0]
+            video = results[page_index]
             v_id = video['id']
             title = video.get("title", "שיר").replace("&", "ו").replace("|", "-")
             
+            mode_str = "&mode=new" if is_new else ""
             return make_yemot_response(
                 f"id_list_message=t-מנגן {title}&"
                 f"play_url={BASE_URL}/stream?v={v_id}&"
-                f"read=t-לשיר הבא הקש 2=choice,1,1,1,7,st-digits,y,no&page={index + 1}"
+                f"read=t-לשיר הבא הקש 2=choice,1,1,1,7,st-digits,y,no&page={page_index + 1}{mode_str}"
             )
     except Exception as e:
         logger.error(f"Error: {e}")
-        return make_yemot_response("id_list_message=t-תקלה טכנית. נסה שוב&goto_main=/")
+        return make_yemot_response("id_list_message=t-תקלה בחיפוש&goto_main=/")
 
 @app.route('/stream')
 def stream_audio():
@@ -86,9 +90,11 @@ def stream_audio():
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={v_id}", download=False)
             url = info.get('url')
         
-        req = requests.get(url, stream=True, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
-        return Response(stream_with_context(req.iter_content(chunk_size=4096)), content_type=req.headers.get('content-type'))
-    except:
+        req = requests.get(url, stream=True, headers={'User-Agent': 'Mozilla/5.0'}, timeout=15)
+        return Response(stream_with_context(req.iter_content(chunk_size=8192)), 
+                        content_type=req.headers.get('content-type'))
+    except Exception as e:
+        logger.error(f"Stream error: {e}")
         return "Error", 500
 
 if __name__ == "__main__":
