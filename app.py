@@ -126,10 +126,10 @@ def youtube_api():
     return make_yemot_response("goto_main=/")
 
 # --- חיפוש עם CACHE + retry ---
+# חיפוש + מיון לפי תאריך (חדש קודם) בלי ytsearchdate - Code by LEMON SHLIF
 def start_search(session):
     query = session.get("query", "שירים")
 
-    # 🔥 cache
     now = time.time()
     if query in SEARCH_CACHE:
         data, timestamp = SEARCH_CACHE[query]
@@ -138,8 +138,7 @@ def start_search(session):
             session["page"] = 0
             return play_current_video(session)
 
-    # 🔥 חיפוש לפי תאריך (חדש קודם)
-    search_string = f"ytsearchdate10:{query}"
+    search_string = f"ytsearch10:{query}"
 
     for attempt in range(MAX_RETRIES):
         try:
@@ -147,7 +146,15 @@ def start_search(session):
                 info = ydl.extract_info(search_string, download=False)
 
             entries = info.get("entries", [])
+
+            # 🔥 סינון
             results = [e for e in entries if not is_filtered(e.get("title"))]
+
+            # 🔥 מיון לפי תאריך (חדש קודם)
+            results.sort(
+                key=lambda x: x.get("upload_date") or "0",
+                reverse=True
+            )
 
             if not results:
                 return make_yemot_response("id_list_message=t-לא נמצאו תוצאות&goto_main=/")
