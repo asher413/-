@@ -1,7 +1,7 @@
 import os
 import time
 import logging
-from flask import Flask, request, make_response
+from flask import Flask, request, make_response, Response, stream_with_context
 import yt_dlp
 from urllib.parse import quote
 import requests
@@ -165,96 +165,57 @@ def start_search(session):
         logger.error(f"SEARCH ERROR: {e}")
         return make_yemot_response("id_list_message=t-שגיאה בחיפוש&goto_main=/")
 
+# --- הזרמת שמע ישירות מהשרת שלך ---
+@app.route('/stream')
+def stream_audio():
+    video_id = request.args.get('v')
+    if not video_id:
+        return "Missing video id", 400
+        
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    
+    try:
+        with yt_dlp.YoutubeDL({'format': 'bestaudio', 'quiet': True}) as ydl:
+            info = ydl.extract_info(url, download=False)
+            audio_url = None
+            for f in info.get("formats", []):
+                if f.get("acodec") != "none":
+                    audio_url = f.get("url")
+                    break
+            
+            if not audio_url:
+                return "Audio not found", 404
+
+        # מזרים את השמע דרך השרת שלך
+        req = requests.get(audio_url, stream=True)
+        return Response(stream_with_context(req.iter_content(chunk_size=1024)), content_type=req.headers.get('content-type', 'audio/mp4'))
+    except Exception as e:
+        logger.error(f"STREAM ERROR: {e}")
+        return "Error", 500
+
 # --- ניגון ---
 def play_current_video(session):
     results = session.get("results", [])
+    page = session.get("page", 0)
 
-    max_attempts = 10  # הגנה אמיתית
+    if page >= len(results):
+        session["step"] = "menu"
+        return make_yemot_response("id_list_message=t-אין עוד תוצאות&goto_main=/")
 
-    for _ in range(max_attempts):
-        page = session.get("page", 0)
+    video = results[page]
+    video_id = video['id']
+    title = video.get("title", "שיר")
 
-        if page >= len(results):
-            session["step"] = "menu"
-            return make_yemot_response("id_list_message=t-אין עוד תוצאות&goto_main=/")
+    # <<< שים לב: אל תשכח לשנות את הכתובת הזו לכתובת האמיתית של השרת שלך >>>
+    my_server_url = "https://my-yt-phone.onrender.com" 
+    stream_url = f"{my_server_url}/stream?v={video_id}"
 
-        video = results[page]
-        video_id = video['id']
-        title = video.get("title", "שיר")
-
-        audio_url = None
-
-        # --- Invidious ---
-        servers = [
-            "https://inv.nadeko.net",
-            "https://yewtu.be",
-            "https://vid.puffyan.us",
-        ]
-
-        for server in servers:
-            try:
-                r = requests.get(
-                    f"{server}/api/v1/videos/{video_id}",
-                    timeout=4,
-                    headers={"User-Agent": "Mozilla/5.0"},
-                    verify=False
-                )
-
-                if r.status_code != 200:
-                    continue
-
-                if "application/json" not in r.headers.get("Content-Type", ""):
-                    continue
-
-                data = r.json()
-
-                for f in data.get("adaptiveFormats", []):
-                    if "audio" in f.get("type", ""):
-                        audio_url = f.get("url")
-                        break
-
-                if audio_url:
-                    break
-
-            except Exception:
-                continue
-
-        # --- yt-dlp fallback ---
-        if not audio_url:
-            try:
-                url = f"https://www.youtube.com/watch?v={video_id}"
-
-                with yt_dlp.YoutubeDL({
-                    'quiet': True,
-                    'format': 'bestaudio',
-                    'nocheckcertificate': True,
-                    'geo_bypass': True,
-                }) as ydl:
-                    info = ydl.extract_info(url, download=False)
-
-                for f in info.get("formats", []):
-                    if f.get("acodec") != "none":
-                        audio_url = f.get("url")
-                        break
-
-            except Exception as e:
-                logger.error(f"YT-DLP FAILED: {e}")
-
-        # --- הצלחה ---
-        if audio_url:
-            session["step"] = "waiting_next"
-            return make_yemot_response(
-                f"id_list_message=t-מנגן כעת {title}&"
-                f"play_url={audio_url}&"
-                f"read=t-לשיר הבא הקש 2 לתפריט הקש 1=choice,1,1,1,7,st-javascript,y,no"
-            )
-
-        # --- דילוג לשיר הבא ---
-        logger.error("SKIPPING VIDEO")
-        session["page"] += 1
-
-    # אם הכל נכשל
-    return make_yemot_response("id_list_message=t-אין אפשרות לנגן&goto_main=/")
+    session["step"] = "waiting_next"
+    return make_yemot_response(
+        f"id_list_message=t-מנגן כעת {title}&"
+        f"play_url={stream_url}&"
+        f"read=t-לשיר הבא הקש 2 לתפריט הקש 1=choice,1,1,1,7,st-javascript,y,no"
+    )
    
 # --- הרצה ---
 if __name__ == "__main__":
