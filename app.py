@@ -106,6 +106,7 @@ def youtube_api():
     return make_yemot_response("goto_main=/")
 
 # --- חיפוש דרך Invidious ---
+# שימוש בשרת Invidious דינמי במקום קבוע - Code by LEMON SHLIF
 def start_search(session):
     query = session.get("query", "שירים")
 
@@ -118,14 +119,16 @@ def start_search(session):
             return play_current_video(session)
 
     try:
-        url = f"{INVIDIOUS_API}/search"
+        api = get_working_invidious()  # 🔥 במקום INVIDIOUS_API
+
+        url = f"{api}/search"
         params = {
             "q": query,
             "type": "video",
             "sort_by": "upload_date"
         }
 
-        res = requests.get(url, params=params, timeout=5)
+        res = requests.get(url, params=params, timeout=3)
         data = res.json()
 
         results = []
@@ -149,7 +152,6 @@ def start_search(session):
     except Exception as e:
         logger.error(f"SEARCH ERROR: {e}")
         return make_yemot_response("id_list_message=t-שגיאה בחיפוש&goto_main=/")
-
 # --- שליפת סטרים ---
 def get_audio_url(video_id):
     try:
